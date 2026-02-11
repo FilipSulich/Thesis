@@ -8,10 +8,7 @@ from pyrqa.image_generator import ImageGenerator
 
 class RecurrencePlotGenerator:
     def __init__(self, signal, time_delay, embedding_dim):
-        self.data_points = signal
-        self.time_delay = time_delay
-        self.embedding_dim = embedding_dim
-        self.time_series = TimeSeries(self.data_points, self.embedding_dim, self.time_delay)
+        self.time_series = TimeSeries(signal, embedding_dim, time_delay)
         self.settings = Settings(time_series=self.time_series, analysis_type=Cross, neighbourhood=Unthresholded(), similarity_measure=EuclideanMetric, theiler_corrector=1)
 
     def compute_rqa(self):

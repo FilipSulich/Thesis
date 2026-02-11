@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 # path = '/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/mitbih/mitbih_af_segments.h5'
 # path = '/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/ptbxl/ptbxl_normal_segments.h5'
 path = '/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/combined_250hz.h5'
-
 with h5py.File(path, 'r') as f:
     signals = f['signals'][:]
     labels = f['labels'][:]

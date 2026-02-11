@@ -866,7 +866,7 @@ if __name__ == '__main__':
         '--lead_times',
         type=int,
         nargs='+',
-        default=[5, 10, 30, 45],
+        default=[5, 10, 15, 30, 45],
         help='Lead times in minutes before AF onset'
     )
     parser.add_argument(
