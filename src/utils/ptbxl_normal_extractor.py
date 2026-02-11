@@ -12,9 +12,9 @@ PTB-XL characteristics:
 
 This script:
 1. Filters for NORM diagnostic class
-2. Samples segments to match the lead-time distribution of pre-AF segments
-3. Assigns pseudo lead-times for balanced training
-4. Maintains patient diversity
+2. Samples segments ensuring patient diversity
+3. Sets lead_time to -1 (normal rhythm has no arrhythmia event)
+4. Bucket assignment for train/test splits is handled at training time
 
 Usage:
     python ptbxl_normal_extractor.py --data_dir /path/to/ptb-xl --output_dir /path/to/output
@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple, Optional
 import json
 import h5py
 from tqdm import tqdm
@@ -48,7 +48,7 @@ class NormalSegment:
     patient_id: str
     source_database: str
     ecg_id: int
-    assigned_lead_time_min: int  # Pseudo lead-time for balanced training
+    lead_time_min: int  # -1 for normal segments (no arrhythmia event)
     segment_duration_sec: float
     original_fs: int
     lead_index: int
@@ -125,97 +125,62 @@ def get_norm_confidence(scp_codes: dict) -> float:
     return scp_codes.get('NORM', 0.0)
 
 
-def sample_balanced_segments(
+def sample_segments(
     df: pd.DataFrame,
-    target_counts: Dict[int, int],
+    n_samples: int,
     random_seed: int = 42
 ) -> pd.DataFrame:
     """
-    Sample segments to match target lead-time distribution.
-
-    Assigns pseudo lead-times to normal segments for balanced training.
+    Sample normal segments ensuring patient diversity.
 
     Parameters:
     -----------
     df : pd.DataFrame
         Filtered NORM records
-    target_counts : Dict[int, int]
-        Target count per lead time {5: 224, 10: 164, 30: 83, 45: 64}
+    n_samples : int
+        Number of segments to sample
     random_seed : int
         Random seed for reproducibility
 
     Returns:
     --------
-    pd.DataFrame with sampled records and assigned lead times
+    pd.DataFrame with sampled records
     """
     np.random.seed(random_seed)
-
-    total_needed = sum(target_counts.values())
 
     # Get unique patients
     patient_ids = df['patient_id'].unique()
 
-    # Sample more patients than needed to ensure diversity
-    if len(df) < total_needed:
-        print(f"Warning: Only {len(df)} NORM records available, need {total_needed}")
-        sampled_df = df.copy()
-    else:
-        # Sample ensuring patient diversity
-        # First, shuffle patients
-        np.random.shuffle(patient_ids)
+    if len(df) < n_samples:
+        print(f"Warning: Only {len(df)} NORM records available, need {n_samples}")
+        return df.copy()
 
-        # Sample records, prioritizing unique patients
-        sampled_records = []
-        used_patients = set()
+    # Sample ensuring patient diversity
+    np.random.shuffle(patient_ids)
 
-        # First pass: one record per patient
-        for pid in patient_ids:
-            if len(sampled_records) >= total_needed:
-                break
-            patient_records = df[df['patient_id'] == pid]
-            if len(patient_records) > 0:
-                record = patient_records.sample(n=1, random_state=random_seed)
-                sampled_records.append(record)
-                used_patients.add(pid)
+    # Sample records, prioritizing unique patients
+    sampled_records = []
 
-        # Second pass: if still need more, allow repeats
-        if len(sampled_records) < total_needed:
-            remaining = total_needed - len(sampled_records)
-            available = df[~df.index.isin([r.index[0] for r in sampled_records])]
-            if len(available) >= remaining:
-                extra = available.sample(n=remaining, random_state=random_seed)
-                sampled_records.append(extra)
-            else:
-                # Use all available
-                sampled_records.append(available)
+    # First pass: one record per patient
+    for pid in patient_ids:
+        if len(sampled_records) >= n_samples:
+            break
+        patient_records = df[df['patient_id'] == pid]
+        if len(patient_records) > 0:
+            record = patient_records.sample(n=1, random_state=random_seed)
+            sampled_records.append(record)
 
-        sampled_df = pd.concat(sampled_records)
+    # Second pass: if still need more, allow repeats
+    if len(sampled_records) < n_samples:
+        remaining = n_samples - len(sampled_records)
+        available = df[~df.index.isin([r.index[0] for r in sampled_records])]
+        if len(available) >= remaining:
+            extra = available.sample(n=remaining, random_state=random_seed)
+            sampled_records.append(extra)
+        else:
+            sampled_records.append(available)
 
-    # Assign pseudo lead-times based on target distribution
-    lead_times = []
-    for lt, count in sorted(target_counts.items()):
-        lead_times.extend([lt] * count)
-
-    # Shuffle and assign
-    np.random.shuffle(lead_times)
-
-    # Trim or extend to match sampled size
-    if len(lead_times) > len(sampled_df):
-        lead_times = lead_times[:len(sampled_df)]
-    elif len(lead_times) < len(sampled_df):
-        # Extend with random distribution
-        extra_needed = len(sampled_df) - len(lead_times)
-        extra_lead_times = np.random.choice(
-            list(target_counts.keys()),
-            size=extra_needed,
-            p=[c/sum(target_counts.values()) for c in target_counts.values()]
-        )
-        lead_times.extend(extra_lead_times)
-
-    sampled_df = sampled_df.iloc[:len(lead_times)].copy()
-    sampled_df['assigned_lead_time_min'] = lead_times[:len(sampled_df)]
-
-    return sampled_df
+    return pd.concat(sampled_records).iloc[:n_samples]
 
 
 def extract_signal(
@@ -303,11 +268,11 @@ def extract_all_segments(
                     signal = np.pad(signal, (0, expected_samples - len(signal)), mode='edge')
 
             metadata = NormalSegment(
-                segment_id=f"ptbxl_{ecg_id}_lt{row['assigned_lead_time_min']}_l{config.lead_index}",
+                segment_id=f"ptbxl_{ecg_id}_l{config.lead_index}",
                 patient_id=f"ptbxl_{int(row['patient_id'])}",
                 source_database="PTB-XL",
                 ecg_id=ecg_id,
-                assigned_lead_time_min=row['assigned_lead_time_min'],
+                lead_time_min=-1,  # Normal segments have no arrhythmia event
                 segment_duration_sec=config.segment_duration_sec,
                 original_fs=fs,
                 lead_index=config.lead_index,
@@ -372,7 +337,7 @@ def save_to_hdf5(
         segment_ids.append(m.segment_id)
         patient_ids.append(m.patient_id)
         ecg_ids.append(m.ecg_id)
-        lead_times.append(m.assigned_lead_time_min)
+        lead_times.append(m.lead_time_min)
         lead_indices.append(m.lead_index)
         lead_names.append(m.lead_name)
         labels.append(m.label)
@@ -423,7 +388,7 @@ def save_metadata_csv(extracted: List[ExtractedSegment], output_path: Path) -> N
     print(f"Saved metadata to {output_path}")
 
 
-def print_summary(extracted: List[ExtractedSegment], target_counts: Dict[int, int]) -> None:
+def print_summary(extracted: List[ExtractedSegment]) -> None:
     """Print extraction summary."""
     print("\n" + "=" * 70)
     print("EXTRACTION SUMMARY")
@@ -433,14 +398,7 @@ def print_summary(extracted: List[ExtractedSegment], target_counts: Dict[int, in
 
     print(f"\nTotal segments extracted: {len(df)}")
     print(f"Unique patients: {df['patient_id'].nunique()}")
-
-    print(f"\nSegments by assigned lead time (target vs actual):")
-    actual_counts = df['assigned_lead_time_min'].value_counts().sort_index()
-    for lt in sorted(target_counts.keys()):
-        target = target_counts[lt]
-        actual = actual_counts.get(lt, 0)
-        status = "✓" if actual == target else f"({target - actual:+d})"
-        print(f"  {lt:2d} min: {actual:4d} segments (target: {target}) {status}")
+    print(f"Lead time: {df['lead_time_min'].iloc[0]} (normal rhythm)")
 
     print(f"\nNORM confidence stats:")
     print(f"  Mean: {df['norm_confidence'].mean():.1f}%")
@@ -458,7 +416,7 @@ def print_summary(extracted: List[ExtractedSegment], target_counts: Dict[int, in
 def main(
     data_dir: str,
     output_dir: str,
-    target_counts: Optional[Dict[int, int]] = None,
+    n_samples: int = 535,
     target_fs: int = 100,
     lead_index: int = 1,
     min_norm_confidence: float = 50.0,
@@ -473,8 +431,8 @@ def main(
         Path to PTB-XL directory
     output_dir : str
         Path to output directory
-    target_counts : Dict[int, int]
-        Target count per lead time. If None, uses default from AF datasets
+    n_samples : int
+        Number of normal segments to extract
     target_fs : int
         Target sampling frequency (100 or 500)
     lead_index : int
@@ -492,10 +450,6 @@ def main(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Default target counts from MIT-BIH + LTAFDB
-    if target_counts is None:
-        target_counts = {5: 224, 10: 164, 30: 83, 45: 64}
-
     config = SegmentConfig(
         segment_duration_sec=10,
         target_fs=target_fs,
@@ -511,7 +465,7 @@ def main(
     print(f"Target frequency: {config.target_fs} Hz")
     print(f"Lead index: {config.lead_index}")
     print(f"Min NORM confidence: {config.min_norm_confidence}%")
-    print(f"Target segments: {sum(target_counts.values())}")
+    print(f"Target segments: {n_samples}")
     print("=" * 70)
 
     # Step 1: Load metadata
@@ -525,9 +479,9 @@ def main(
     print(f"  NORM records (confidence >= {config.min_norm_confidence}%): {len(norm_df)}")
     print(f"  Unique patients: {norm_df['patient_id'].nunique()}")
 
-    # Step 3: Sample balanced segments
-    print("\n[3/4] Sampling balanced segments...")
-    sampled_df = sample_balanced_segments(norm_df, target_counts, random_seed)
+    # Step 3: Sample segments
+    print("\n[3/4] Sampling segments...")
+    sampled_df = sample_segments(norm_df, n_samples, random_seed)
     print(f"  Sampled records: {len(sampled_df)}")
 
     # Step 4: Extract signals
@@ -543,11 +497,6 @@ def main(
     summary = {
         'total_segments': len(extracted),
         'unique_patients': len(set(seg.metadata.patient_id for seg in extracted)),
-        'target_counts': target_counts,
-        'actual_counts': {
-            lt: sum(1 for seg in extracted if seg.metadata.assigned_lead_time_min == lt)
-            for lt in target_counts.keys()
-        },
         'config': {
             'target_fs': config.target_fs,
             'lead_index': config.lead_index,
@@ -557,7 +506,7 @@ def main(
     with open(output_path / 'ptbxl_normal_summary.json', 'w') as f:
         json.dump(summary, f, indent=2)
 
-    print_summary(extracted, target_counts)
+    print_summary(extracted)
 
     return sampled_df
 
@@ -577,6 +526,12 @@ if __name__ == '__main__':
         '--output_dir',
         default='/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/ptbxl',
         help='Path to output directory'
+    )
+    parser.add_argument(
+        '--n_samples',
+        type=int,
+        default=535,
+        help='Number of normal segments to extract'
     )
     parser.add_argument(
         '--target_fs',
@@ -603,45 +558,13 @@ if __name__ == '__main__':
         default=42,
         help='Random seed for reproducibility'
     )
-    # Custom target counts
-    parser.add_argument(
-        '--target_5min',
-        type=int,
-        default=224,
-        help='Target count for 5-min lead time'
-    )
-    parser.add_argument(
-        '--target_10min',
-        type=int,
-        default=164,
-        help='Target count for 10-min lead time'
-    )
-    parser.add_argument(
-        '--target_30min',
-        type=int,
-        default=83,
-        help='Target count for 30-min lead time'
-    )
-    parser.add_argument(
-        '--target_45min',
-        type=int,
-        default=64,
-        help='Target count for 45-min lead time'
-    )
 
     args = parser.parse_args()
-
-    target_counts = {
-        5: args.target_5min,
-        10: args.target_10min,
-        30: args.target_30min,
-        45: args.target_45min
-    }
 
     main(
         data_dir=args.data_dir,
         output_dir=args.output_dir,
-        target_counts=target_counts,
+        n_samples=args.n_samples,
         target_fs=args.target_fs,
         lead_index=args.lead,
         min_norm_confidence=args.min_confidence,
