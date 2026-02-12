@@ -101,7 +101,7 @@ def main():
     print(f"  Pre-AF (1): {np.sum(labels == 1)}")
     print(f"  Normal (0): {np.sum(labels == 0)}")
     print(f"\nBy lead time:")
-    for lt in [5, 10, 30, 45]:
+    for lt in [5, 10, 15, 30, 45]:
         print(f"  {lt} min: {np.sum(lead_times == lt)}")
     print(f"\nUnique patients: {len(set(patient_ids))}")
     print(f"\nSaved to: {output_path}")

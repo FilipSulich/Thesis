@@ -9,11 +9,9 @@ class WaveletTransform(ABC):
         self.level = level
 
     @abstractmethod
-    def decompose(self, signal: np.ndarray) -> list:
-        """Decompose signal into wavelet coefficients."""
+    def decompose(self, signal: np.ndarray, level) -> list:
         pass
 
     @abstractmethod
     def reconstruct(self, coeffs: list) -> np.ndarray:
-        """Reconstruct signal from wavelet coefficients."""
         pass
