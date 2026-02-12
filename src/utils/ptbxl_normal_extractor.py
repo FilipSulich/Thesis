@@ -416,7 +416,7 @@ def print_summary(extracted: List[ExtractedSegment]) -> None:
 def main(
     data_dir: str,
     output_dir: str,
-    n_samples: int = 535,
+    n_samples: int = 670,
     target_fs: int = 100,
     lead_index: int = 1,
     min_norm_confidence: float = 50.0,
@@ -530,7 +530,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--n_samples',
         type=int,
-        default=535,
+        default=670,
         help='Number of normal segments to extract'
     )
     parser.add_argument(
