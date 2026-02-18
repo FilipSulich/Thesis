@@ -3,7 +3,7 @@ import numpy as np
 import sys
 import matplotlib.pyplot as plt
 
-from data_cleaning.data_cleaner import DataCleaner
+from src.data_cleaning.data_cleaner import DataCleaner
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 from src.wavelets.discrete_wavelet_transform import DWT
 from src.wavelets.stationary_wavelet_transform import SWT
@@ -74,16 +74,32 @@ def plot_signal(file_path, split="train", index=0, sampling_rate=250):
 
         data_cleaner = DataCleaner()
         clean_signal, info = data_cleaner.preprocess(signal)
+
+        if clean_signal is None:
+            print(f"Signal at index {index} failed quality check: {info}")
+            return
+
         swt = SWT()
         dwt = DWT()
-        decomposed_swt = swt.decompose(signal, level=4)
-        decomposed_dwt = dwt.decompose(signal, level=4)
-        plot_swt_results(decomposed_swt, clean_signal)
-        plot_dwt_results(decomposed_dwt)
+        (cD1,cA1), (cD2,cA2), (cD3,cA3), (cD4,cA4) = swt.decompose(clean_signal, level=4)
+        decomposed_dwt = dwt.decompose(clean_signal, level=4)
 
+        # plot_swt_results(decomposed_swt, clean_signal)
+        # plot_dwt_results(decomposed_dwt)
+        # print(len(decomposed_swt))
+        # i=0
+        # for item in decomposed_swt:
+        #     print(f"level {i}")
+        #     i=i+1
+        #     for sub_item in item:
+        #         print(sub_item)
+
+        print(cD1)
+
+        # recurrence_plot_generator = RecurrencePlotGenerator(clean_signal, 4,7, unthresholded=False)
+        # recurrence_plot_generator.plot_recurrence("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted")
 
         time = np.arange(len(signal)) / sampling_rate
-
 
         fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=False, sharey=False)
 
@@ -103,6 +119,6 @@ if __name__ == "__main__":
     split = "train"
     #279
     index = np.random.randint(746)
-    file_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset.h5"
+    file_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset_clean.h5"
     #650,714 index good
-    plot_signal(file_path, split, index)
+    plot_signal(file_path, split, 280)
