@@ -5,8 +5,9 @@ import matplotlib.pyplot as plt
 
 from src.data_cleaning.data_cleaner import DataCleaner
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
-from src.wavelets.discrete_wavelet_transform import DWT
-from src.wavelets.stationary_wavelet_transform import SWT
+
+from wavelets.discrete_wavelet_transform import DWT
+from wavelets.stationary_wavelet_transform import SWT
 
 
 def plot_swt_results(decomposed_signal, original_signal=None):
@@ -121,4 +122,4 @@ if __name__ == "__main__":
     index = np.random.randint(746)
     file_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset_clean.h5"
     #650,714 index good
-    plot_signal(file_path, split, 280)
+    plot_signal(file_path, split, 160)

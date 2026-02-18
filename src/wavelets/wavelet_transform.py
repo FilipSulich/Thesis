@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
-import pywt
 import numpy as np
-
 
 class WaveletTransform(ABC):
     def __init__(self, wavelet='db4', level=4):

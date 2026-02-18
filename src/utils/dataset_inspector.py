@@ -99,31 +99,17 @@ class DatasetInspector:
         lead_time: int = 5,
         source_db: Optional[str] = None,
     ) -> Dict:
-        """
-        Find matched pre-AF and normal segments from the same patients and database.
-
-        Args:
-            split: Dataset split
-            lead_time: Lead time in minutes for pre-AF segments
-            source_db: Filter by source database (e.g., 'ltafdb'). If None, auto-select db with most matches.
-
-        Returns:
-            Dict with 'pre_af' and 'normal' segment lists, plus metadata.
-        """
         with h5py.File(self.file_path, "r") as f:
             lead_times = f[f"{split}/lead_times"][:]
             patient_ids = f[f"{split}/patient_ids"][:]
             segment_ids = f[f"{split}/segment_ids"][:]
 
-            # Decode bytes if needed
             def decode(x):
                 return x.decode() if isinstance(x, bytes) else str(x)
 
             def extract_db(segment_id: str) -> str:
-                # e.g. "afdb_04015_ep0_lt5" -> "afdb"
                 return segment_id.split("_")[0]
 
-            # Build index of all segments
             all_segments = []
             for i in range(len(lead_times)):
                 seg_id = decode(segment_ids[i])
@@ -136,7 +122,6 @@ class DatasetInspector:
                     "source_db": extract_db(seg_id),
                 })
 
-            # Find patients with BOTH pre-AF at specified lead time AND normal segments
             patients_with_preaf = {}
             patients_with_normal = {}
 
@@ -156,13 +141,11 @@ class DatasetInspector:
                         patients_with_normal[key] = []
                     patients_with_normal[key].append(seg)
 
-            # Find patients that have both
             matched_keys = set(patients_with_preaf.keys()) & set(patients_with_normal.keys())
 
             if source_db:
                 matched_keys = {k for k in matched_keys if k[1] == source_db}
             else:
-                # Auto-select: group by db and pick the one with most matched patients
                 db_counts = {}
                 for pid, db in matched_keys:
                     db_counts[db] = db_counts.get(db, 0) + 1
@@ -170,13 +153,11 @@ class DatasetInspector:
                     source_db = max(db_counts, key=db_counts.get)
                     matched_keys = {k for k in matched_keys if k[1] == source_db}
 
-            # Collect matched segments
             pre_af_segments = []
             normal_segments = []
 
             for key in matched_keys:
                 pre_af_segments.extend(patients_with_preaf[key])
-                # Take same number of normal segments as pre-AF for this patient
                 n_preaf = len(patients_with_preaf[key])
                 normal_segments.extend(patients_with_normal[key][:n_preaf])
 
