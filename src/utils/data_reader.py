@@ -30,23 +30,3 @@ class DataReader:
                 "lead_time": [lead_times[index]],
                 "is_normal": [is_normal],
             }
-
-
-    def read_data_csv(self, is_normal):
-        data = pd.read_csv(self.file_path_csv)
-
-        normal_signals = []
-        preaf_signals = []
-        # for index, row in data.iterrows():
-            # print(index,row)
-        return data
-
-
-if __name__ == "__main__":
-    path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_5min_50.csv"
-    reader = DataReader(file_path=path, file_path_csv=path, sampling_rate=250)
-    data = reader.read_data_csv(is_normal=True)
-    signals = data.iloc[:,5:]
-    print(signals)
-
-

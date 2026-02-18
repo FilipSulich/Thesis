@@ -10,11 +10,12 @@ from pyrqa.image_generator import ImageGenerator
 import os
 
 class RecurrencePlotGenerator:
-    def __init__(self, signal, time_delay, embedding_dim, path, unthresholded=False):
+    def __init__(self, signal, time_delay, embedding_dim, path, epsilon, unthresholded=False):
         self.time_series = TimeSeries(signal, embedding_dimension=embedding_dim, time_delay=time_delay)
         self.unthresholded = unthresholded
+        self.epsilon = epsilon
         self.settings_unthreshold = Settings(time_series=self.time_series, analysis_type=Cross, neighbourhood=Unthresholded(),similarity_measure=EuclideanMetric, theiler_corrector=1)
-        self.settings = Settings(time_series=self.time_series, analysis_type=Classic, neighbourhood=FixedRadius(0.65), similarity_measure=EuclideanMetric, theiler_corrector=1)
+        self.settings = Settings(time_series=self.time_series, analysis_type=Classic, neighbourhood=FixedRadius(epsilon), similarity_measure=EuclideanMetric, theiler_corrector=1)
         self.path = path
 
     def compute_rqa_binary(self):

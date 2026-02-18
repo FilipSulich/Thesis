@@ -1,8 +1,3 @@
-"""
-Preprocess the entire dataset: apply cleaning to all signals and save to a new HDF5 file.
-Signals that fail quality checks are excluded.
-"""
-
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -61,7 +56,6 @@ def preprocess_dataset(
     n_rejected = len(rejected_info)
     print(f"\nDone: {n_passed} passed, {n_rejected} rejected ({100*n_rejected/n_total:.1f}%)")
 
-    # Save to new HDF5
     with h5py.File(output_path, "w") as f_out:
         grp = f_out.create_group(split)
         grp.create_dataset("signals", data=np.array(clean_signals))
@@ -79,8 +73,3 @@ if __name__ == "__main__":
     output_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset_clean.h5"
 
     rejected = preprocess_dataset(input_path, output_path)
-
-    if rejected:
-        print(f"\nFirst 10 rejected segments:")
-        for r in rejected[:10]:
-            print(f"  {r['segment_id']}: {r['reason']}")

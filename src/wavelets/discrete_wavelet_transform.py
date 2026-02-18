@@ -1,6 +1,6 @@
 import pywt
 import numpy as np
-from src.wavelets.wavelet_transform import WaveletTransform
+from src import WaveletTransform
 
 
 class DWT(WaveletTransform):

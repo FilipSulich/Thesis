@@ -100,6 +100,7 @@ class Pipeline:
             signal=signal,
             time_delay=self.time_delay,
             embedding_dim=self.embedding_dim,
+            epsilon=0.3,
             path="/Users/filipsulich/Library/CloudStorage/GoogleDrive-sulich.f@gmail.com/My Drive/Thesis/Recurrence_Plots_single_scale_unthresholded",
             unthresholded=True,
         )
@@ -176,10 +177,6 @@ def results_to_csv(results: List[PipelineResult], output_path: str):
 
     print(f"Saved {len(results)} results to {output_path}")
 
-def analyze_result(results):
-    import pandas as pd
-    data = pd.read_csv(results)
-    return
 
 if __name__ == '__main__':
     csv_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_5min_50.csv"
