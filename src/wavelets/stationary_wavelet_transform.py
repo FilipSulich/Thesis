@@ -14,7 +14,6 @@ class SWT(WaveletTransform):
         if remainder != 0:
             pad_width = required_multiple - remainder
             signal = np.pad(signal, (0, pad_width))
-
         return pywt.swt(signal, self.wavelet, level=level)
 
     def reconstruct(self, coefficients: list) -> np.ndarray:

@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import h5py
@@ -70,6 +70,6 @@ def preprocess_dataset(
 
 if __name__ == "__main__":
     input_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset.h5"
-    output_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset_clean.h5"
+    output_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset_clean_2.h5"
 
     rejected = preprocess_dataset(input_path, output_path)

@@ -175,8 +175,8 @@ if __name__ == "__main__":
     inspector = DatasetInspector(path)
 
     inspector.export_matched_segments(
-        output_path="/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_5min_50.csv",
+        output_path="/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_5min_50_2.csv",
         split="train",
         lead_time=5,
-        limit=50,
+        limit=100,
     )

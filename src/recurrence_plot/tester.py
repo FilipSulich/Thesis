@@ -121,7 +121,7 @@ def plot_sensitivity_results(results, metric='DET'):
 
 
 import pandas as pd
-df = pd.read_csv('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_5min_50.csv')
+df = pd.read_csv('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_segments2.csv')
 signal_cols = [c for c in df.columns if c.startswith('s') and c[1:].isdigit()]
 
 af_segments   = [df[df.is_normal == False].iloc[i][signal_cols].values.astype(np.float64)
@@ -134,7 +134,7 @@ results = run_sensitivity_analysis(
     af_segments=af_segments,
     normal_segments=norm_segments,
     embedding_dim=3,
-    time_delay=19,
+    time_delay=18,
     target_rrs=(0.02, 0.05, 0.10),
     n_segments=10
 )
