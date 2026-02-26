@@ -2,13 +2,13 @@ import h5py
 import numpy as np
 import sys
 import matplotlib.pyplot as plt
+import os
 
 from src.data_cleaning.data_cleaner import DataCleaner
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
+from src.wavelets.stationary_wavelet_transform import SWT
 
-from wavelets.discrete_wavelet_transform import DWT
-from wavelets.stationary_wavelet_transform import SWT
-
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def plot_swt_results(decomposed_signal, original_signal=None):
     num_levels = len(decomposed_signal)
@@ -57,7 +57,7 @@ def plot_dwt_results(coeffs):
     plt.show()
 
 
-def plot_signal(file_path, split="train", index=0, sampling_rate=250):
+def plot_signal(file_path, split="learning", index=0, sampling_rate=128):
     with h5py.File(file_path, "r") as f:
         signals = f[f"{split}/signals"]
         labels = f[f"{split}/labels"]
@@ -73,32 +73,27 @@ def plot_signal(file_path, split="train", index=0, sampling_rate=250):
         patient_id = patient_ids[index]
         segment_id = segment_ids[index]
 
-        data_cleaner = DataCleaner()
-        clean_signal, info = data_cleaner.preprocess(signal)
+        # data_cleaner = DataCleaner()
+        # clean_signal, info = data_cleaner.preprocess(signal)
 
-        if clean_signal is None:
-            print(f"Signal at index {index} failed quality check: {info}")
-            return
+        # if clean_signal is None:
+        #     print(f"Signal at index {index} failed quality check: {info}")
+        #     return
 
         swt = SWT()
-        dwt = DWT()
-        (cD1,cA1), (cD2,cA2), (cD3,cA3), (cD4,cA4) = swt.decompose(clean_signal, level=4)
-        decomposed_dwt = dwt.decompose(clean_signal, level=4)
+        # dwt = DWT()
+        (cD1,cA1), (cD2,cA2), (cD3,cA3), (cD4,cA4) = swt.decompose(signal, level=4)
+        # decomposed_dwt = dwt.decompose(clean_signal, level=4)
 
-        # plot_swt_results(decomposed_swt, clean_signal)
         # plot_dwt_results(decomposed_dwt)
+        coeffs = (cD1,cA1), (cD2,cA2), (cD3,cA3), (cD4,cA4)
+        plot_swt_results(coeffs)
         # print(len(decomposed_swt))
-        # i=0
-        # for item in decomposed_swt:
-        #     print(f"level {i}")
-        #     i=i+1
-        #     for sub_item in item:
-        #         print(sub_item)
 
         print(cD1)
 
-        # recurrence_plot_generator = RecurrencePlotGenerator(clean_signal, 4,7, unthresholded=False)
-        # recurrence_plot_generator.plot_recurrence("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted")
+        # recurrence_plot_generator = RecurrencePlotGenerator(signal, 3,3, epsilon=0.3,path="/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted", unthresholded=False)
+        # recurrence_plot_generator.plot_recurrence(patient_id, segment_id)
 
         time = np.arange(len(signal)) / sampling_rate
 
@@ -107,8 +102,8 @@ def plot_signal(file_path, split="train", index=0, sampling_rate=250):
         # plt.figure()
         ax[0].plot(time, signal)
         ax[0].set_title(f"Signal Raw Label: {label} Index {index} Patient ID {patient_id} Segment ID {segment_id}")
-        time_clean = np.arange(len(clean_signal)) / sampling_rate
-        ax[1].plot(time_clean, clean_signal)
+        time_clean = np.arange(len(signal)) / sampling_rate
+        ax[1].plot(time_clean, signal)
         ax[1].set_title("Cleaned Signal")
         ax[1].set_xlabel("Time (s)")
         ax[0].set_ylabel("Amplitude")
@@ -117,9 +112,9 @@ def plot_signal(file_path, split="train", index=0, sampling_rate=250):
 
 
 if __name__ == "__main__":
-    split = "train"
+    split = "learning"
     #279
-    index = np.random.randint(746)
-    file_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/unified_af_dataset_clean.h5"
+    index = np.random.randint(20)
+    file_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf/paf_segments_all_clean.h5"
     #650,714 index good
-    plot_signal(file_path, split, 160)
+    plot_signal(file_path, split, 500)

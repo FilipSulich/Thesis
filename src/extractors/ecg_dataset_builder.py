@@ -24,7 +24,7 @@ SEGMENT_DURATION_SEC = 12
 TARGET_FS = 250
 SEGMENT_SAMPLES = SEGMENT_DURATION_SEC * TARGET_FS  # 2500 samples
 LEAD_TIMES_MIN = (5, 10, 15, 30, 45)
-MIN_DISTANCE_FROM_AF_MIN = 5  # Normal segments must be 5+ min away from any AF
+MIN_DISTANCE_FROM_AF_MIN = 60  # Normal segments must be 5+ min away from any AF
 RANDOM_SEED = 42
 
 
