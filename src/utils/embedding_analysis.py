@@ -170,11 +170,28 @@ if __name__ == "__main__":
 
     csv_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf/subbands/A4.csv"
     csv_path2 = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/matched_segments_full.csv"
-
-    tau = 16
+    csv_path3 = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/mitbih/results/subbands/mitbih_lt5_D4.csv"
+    tau = 1
     max_dim = 20
 
-    signals = load_signals_from_csv(csv_path)
+    #optimal parameters
+    #single scale: time delay = 21, m = 7
+    #A4: time delay = 20, m = 9
+    #D1: time delay = 7, m = 4
+    #D2: time delay = 4, m = 6
+    #D3: time delay = 2, m = 5,
+    #D4: time delay = 1, m = 7
+
+    subband_params = {
+        "original": {"tau": 21, "m": 7, "target_rr": 0.05},
+        "D1": {"tau": 7, "m": 4, "target_rr": 0.05},
+        "D2": {"tau": 4, "m": 6, "target_rr": 0.05},
+        "D3": {"tau": 2, "m": 5, "target_rr": 0.05},
+        "D4": {"tau": 1, "m": 7, "target_rr": 0.05},
+        "A4": {"tau": 20, "m": 9, "target_rr": 0.05},
+    }
+
+    signals = load_signals_from_csv(csv_path3)
 
     print(f"Loaded {len(signals)} signals")
     print(f"Using tau = {tau}")
