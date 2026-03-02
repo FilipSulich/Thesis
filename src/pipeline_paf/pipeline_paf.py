@@ -72,12 +72,14 @@ class PAFPipeline:
         time_delay: int = 12,
         embedding_dim: int = 7,
         target_rr: float = 0.05,
+        percentage=0.1,
         subband_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         self.time_delay = time_delay
         self.embedding_dim = embedding_dim
         self.target_rr = target_rr
         self.subband_params = subband_params
+        self.percentage = percentage
 
     def load_data(self, split: str = 'all', use_filtered: bool = True) -> Tuple[np.ndarray, np.ndarray, List[str], List[str]]:
         if split == 'all':
@@ -118,7 +120,7 @@ class PAFPipeline:
 
         return reconstructions
 
-    def get_epsilon_percentage_of_max(self, signal: np.ndarray, embedding_dim: int, time_delay: int,percentage: float = 0.10) -> float:
+    def get_epsilon_percentage_of_max(self, signal: np.ndarray, embedding_dim: int, time_delay: int) -> float:
         N = len(signal) - (embedding_dim - 1) * time_delay
         embedded = np.array([
             signal[i:i + embedding_dim * time_delay:time_delay]
@@ -127,8 +129,8 @@ class PAFPipeline:
         distances = pdist(embedded, metric='euclidean')
         max_distance = float(np.max(distances))
         standard_deviation = np.std(distances)
-        const = 0.2 * standard_deviation
-        # return percentage * max_distance
+        # const = 0.2 * standard_deviation
+        return self.percentage * max_distance
         return const
 
     def _get_epsilon_for_target_rr(
@@ -154,8 +156,8 @@ class PAFPipeline:
         self,
         signal: np.ndarray,
         subband_name: Optional[str] = None,
+        percentage: float = 0.10,
     ):
-        # Signal is already z-score normalized (mean=0, std=1)
         if subband_name and self.subband_params and subband_name in self.subband_params:
             params = self.subband_params[subband_name]
             tau = params.get("tau", self.time_delay)
@@ -167,7 +169,11 @@ class PAFPipeline:
             target_rr = self.target_rr
 
         # Use target RR percentile approach for z-score normalized signals
-        epsilon = self._get_epsilon_for_target_rr(signal, m, tau, target_rr)
+        # epsilon = self._get_epsilon_for_target_rr(signal, m, tau, target_rr)
+        # epsilon = self._get_epsilon_for_target_rr(signal, m, tau, target_rr)
+
+        epsilon = percentage * np.std(signal)
+        # epsilon = self.get_epsilon_percentage_of_max(signal, m, tau)
 
         rp_gen = recurrence_plot.RecurrencePlotGenerator(
             signal=signal,
@@ -187,6 +193,7 @@ class PAFPipeline:
         patient_id: str,
         label: int,
         single_scale: bool = True,
+            percentage: float = 0.10,
     ) -> PAFResult:
         result = PAFResult(
             segment_id=segment_id,
@@ -196,11 +203,11 @@ class PAFPipeline:
         )
 
         if single_scale:
-            result.rqa_results["signal"] = self._compute_rqa(signal)
+            result.rqa_results["signal"] = self._compute_rqa(signal, percentage=percentage)
         else:
             subbands = self._reconstruct_subbands(signal)
             for name, subband_signal in subbands.items():
-                result.rqa_results[name] = self._compute_rqa(subband_signal, subband_name=name)
+                result.rqa_results[name] = self._compute_rqa(subband_signal, subband_name=name, percentage=percentage)
 
         return result
 
@@ -210,6 +217,7 @@ class PAFPipeline:
         single_scale: bool = True,
         max_samples: Optional[int] = None,
         use_filtered: bool = True,
+            percentage: float = 0.10,
     ) -> List[PAFResult]:
         signals, labels, segment_ids, patient_ids = self.load_data(split, use_filtered=use_filtered)
         if max_samples:
@@ -227,6 +235,8 @@ class PAFPipeline:
                     patient_id=patient_ids[i],
                     label=int(labels[i]),
                     single_scale=single_scale,
+                    percentage=percentage,
+
                 )
                 results.append(result)
             except Exception as e:
@@ -304,18 +314,19 @@ class PAFPipeline:
         self,
         split: str = 'all',
         max_samples: Optional[int] = None,
+            percentage: float = 0.10,
     ) -> List[PAFResult]:
-        return self.run_batch(split=split, single_scale=False, max_samples=max_samples)
+        return self.run_batch(split=split, single_scale=False, max_samples=max_samples, percentage=percentage)
 
 
 
 if __name__ == '__main__':
     subband_params = {
-        "D1": {"tau": 6, "m": 7, "target_rr": 0.05},
-        "D2": {"tau": 4, "m": 7, "target_rr": 0.05},
-        "D3": {"tau": 2, "m": 7, "target_rr": 0.05},
-        "D4": {"tau": 2, "m": 7, "target_rr": 0.05},
-        "A4": {"tau": 16, "m": 8, "target_rr": 0.05},
+        "D1": {"tau": 6, "m": 7, "target_rr": 0.1},
+        "D2": {"tau": 4, "m": 7, "target_rr": 0.1},
+        "D3": {"tau": 2, "m": 7, "target_rr": 0.1},
+        "D4": {"tau": 2, "m": 7, "target_rr": 0.1},
+        "A4": {"tau": 16, "m": 8, "target_rr": 0.1},
     }
 
     #for single scale, optimal tau=12,m=7
@@ -323,17 +334,14 @@ if __name__ == '__main__':
         time_delay=3,
         embedding_dim=3,
         target_rr=0.05,
+        percentage= 0.2,
         subband_params=subband_params,
     )
 
     # pipeline.decompose_to_csv(split='all')
 
-    results = pipeline.run_batch(split='all', single_scale=True)
-    # results = pipeline.run_multiscale_batch(split='all')
+    # results = pipeline.run_batch(split='all', single_scale=True)
+    results = pipeline.run_multiscale_batch(split='all')
 
-    output_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/output/results_single_scale_all_clean_new_20_std.csv"
+    output_path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/output_new/multi_scale_20_std.csv"
     pipeline.results_to_csv(results, output_path=output_path)
-
-    # Visualize samples
-    # pipeline.visualize_samples(split='all', n_normal=2, n_preaf=2, single_scale=True)
-    # pipeline.visualize_samples(split='train', n_normal=2, n_preaf=2, single_scale=False)

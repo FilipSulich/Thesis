@@ -1,7 +1,3 @@
-"""
-PAF Data Visualizer for investigating signals, subbands, and recurrence plots.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -14,18 +10,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import wavelets.stationary_wavelet_transform as stationary_wavelet
 
-# Paths
 DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf')
 # HDF5_PATH = DATA_DIR / 'paf_segments_all_clean.h5'
 HDF5_PATH = DATA_DIR / 'paf_segments_all_clean_new_cleaning.h5'
+# HDF5_PATH = DATA_DIR / 'paf_segments_all_clean_new_cleaning_no_upper_filter.h5'
+# HDF5_PATH = DATA_DIR / 'paf_segments_all_clean_new_cleaning_min_max_with_upper.h5'
 
 SAMPLING_FREQ = 128
 SUBBAND_NAMES = ["D1", "D2", "D3", "D4", "A4"]
 
 
 class PAFVisualizer:
-    """Visualizer for PAF dataset investigation."""
-
     def __init__(self, subband_params: Optional[Dict[str, Dict[str, Any]]], hdf5_path: Optional[Path] = None, ):
         self.hdf5_path = hdf5_path or HDF5_PATH
         self.signals = None
@@ -236,16 +231,15 @@ class PAFVisualizer:
             print(f"Saved to {save_path}")
         plt.show()
 
-
     def compute_rp(
-        self,
-        signal: np.ndarray,
-        time_delay: int = 12,
-        embedding_dim: int = 7,
-        epsilon: Optional[float] = None,
-        epsilon_percent: float = 0.10
+            self,
+            signal: np.ndarray,
+            time_delay: int = 12,
+            embedding_dim: int = 7,
+            epsilon_method: str = 'std',  # 'std' or 'max_distance'
+            epsilon_factor: float = 0.2
     ) -> np.ndarray:
-        """Compute recurrence plot for a signal."""
+        """Compute recurrence plot. Epsilon computed from raw unnormalized signal."""
         from pyrqa.time_series import TimeSeries
         from pyrqa.settings import Settings
         from pyrqa.analysis_type import Classic
@@ -253,24 +247,16 @@ class PAFVisualizer:
         from pyrqa.metric import EuclideanMetric
         from pyrqa.computation import RPComputation
 
-        # Normalize
-        # signal = (signal - np.mean(signal)) / (np.std(signal) + 1e-8)
-
-        # Compute epsilon if not provided (percentage of max phase space diameter)
-        if epsilon is None:
-
-            # Embed manually for epsilon calculation
+        # Compute epsilon from raw signal BEFORE any normalization
+        if epsilon_method == 'std':
+            epsilon = epsilon_factor * np.std(signal)
+        elif epsilon_method == 'max_distance':
             n = len(signal) - (embedding_dim - 1) * time_delay
             embedded = np.array([signal[i:i + embedding_dim * time_delay:time_delay] for i in range(n)])
             from scipy.spatial.distance import pdist
             distances = pdist(embedded, metric='euclidean')
-            distance = np.max(distances) * epsilon_percent
-            # epsilon = np.max(distances) * epsilon_percent
-            # epsilon = np.percentile(distances, epsilon_percent * 100)
-            epsilon = 0.2 * np.std(distances)
-            print(f"epsilon={epsilon}")
-            print(f"distance={distance}")
-        # Compute RP using pyrqa
+            epsilon = epsilon_factor * np.max(distances)
+
         ts = TimeSeries(signal, embedding_dimension=embedding_dim, time_delay=time_delay)
         settings = Settings(
             time_series=ts,
@@ -281,16 +267,14 @@ class PAFVisualizer:
         )
         rp_computation = RPComputation.create(settings, verbose=False)
         result = rp_computation.run()
-
         return result.recurrence_matrix
 
     def compute_rp_unthresholded(
-        self,
-        signal: np.ndarray,
-        time_delay: int = 12,
-        embedding_dim: int = 7
+            self,
+            signal: np.ndarray,
+            time_delay: int = 12,
+            embedding_dim: int = 7
     ) -> np.ndarray:
-        """Compute unthresholded recurrence plot (distance matrix) for a signal."""
         from pyrqa.time_series import TimeSeries
         from pyrqa.settings import Settings
         from pyrqa.analysis_type import Classic
@@ -298,10 +282,6 @@ class PAFVisualizer:
         from pyrqa.metric import EuclideanMetric
         from pyrqa.computation import RPComputation
 
-        # Normalize
-        signal = (signal - np.mean(signal)) / (np.std(signal) + 1e-8)
-
-        # Compute unthresholded RP using pyrqa
         ts = TimeSeries(signal, embedding_dimension=embedding_dim, time_delay=time_delay)
         settings = Settings(
             time_series=ts,
@@ -312,7 +292,6 @@ class PAFVisualizer:
         )
         rp_computation = RPComputation.create(settings, verbose=False)
         result = rp_computation.run()
-
         return result.recurrence_matrix_reverse_normalized
 
     def plot_rp(
@@ -456,11 +435,12 @@ class PAFVisualizer:
         plt.show()
 
     def plot_subband_rps(
-        self,
-        idx: int,
-        epsilon_percent: float = 0.050,
-        show_unthresholded: bool = False,
-        save_path: Optional[Path] = None
+            self,
+            idx: int,
+            epsilon_method: str = 'std',
+            epsilon_factor: float = 0.2,
+            show_unthresholded: bool = False,
+            save_path: Optional[Path] = None
     ):
         signal, label, seg_id, pat_id = self.get_signal(idx)
         subbands = self.decompose_signal(signal)
@@ -473,58 +453,59 @@ class PAFVisualizer:
         else:
             fig, axes = plt.subplots(5, 2, figsize=(12, 15))
 
-
         for i, name in enumerate(SUBBAND_NAMES):
             sub = subbands[name]
             params = self.subband_params[name]
-            tau = params.get('tau', 0)
-            m = params.get('m', 0)
+            tau = params.get('tau', 3)
+            m = params.get('m', 3)
 
             t = np.arange(len(sub)) / SAMPLING_FREQ
 
             axes[i, 0].plot(t, sub, color=color, linewidth=0.5)
-            axes[i, 0].set_ylabel(name)
+            axes[i, 0].set_ylabel(f'{name}\nstd={np.std(sub):.4f}')
             axes[i, 0].grid(True, alpha=0.3)
             if i == 0:
                 axes[i, 0].set_title(f'{label_str} | {seg_id} | id: {idx}')
 
+            eps = epsilon_factor * np.std(sub) if epsilon_method == 'std' else epsilon_factor * np.max(sub)
+
             if show_unthresholded:
-                # Unthresholded RP
                 rp_unthresh = self.compute_rp_unthresholded(sub, tau, m)
                 im = axes[i, 1].imshow(rp_unthresh, cmap='viridis', origin='lower', aspect='equal')
                 axes[i, 1].set_title(f'{name} Unthresholded RP')
                 plt.colorbar(im, ax=axes[i, 1], fraction=0.046, pad=0.04)
 
-                # Thresholded RP
-                rp_thresh = self.compute_rp(sub, tau, m, epsilon_percent=epsilon_percent)
+                rp_thresh = self.compute_rp(sub, tau, m,
+                                            epsilon_method=epsilon_method,
+                                            epsilon_factor=epsilon_factor)
                 rr = np.sum(rp_thresh) / (rp_thresh.shape[0] * rp_thresh.shape[1])
                 axes[i, 2].imshow(rp_thresh, cmap='binary', origin='lower', aspect='equal')
-                axes[i, 2].set_title(f'{name} Thresholded RP | RR={rr:.4f}')
+                axes[i, 2].set_title(f'{name} Thresholded RP | RR={rr:.4f}, eps={eps:.4f}')
             else:
-                # Thresholded RP only
-                rp = self.compute_rp(sub, tau, m, epsilon_percent=epsilon_percent)
+                rp = self.compute_rp(sub, tau, m,
+                                     epsilon_method=epsilon_method,
+                                     epsilon_factor=epsilon_factor)
                 rr = np.sum(rp) / (rp.shape[0] * rp.shape[1])
                 axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
-                axes[i, 1].set_title(f'{name} RP | RR={rr:.4f}')
+                axes[i, 1].set_title(f'{name} RP | RR={rr:.4f}, eps={eps:.4f}')
 
         axes[-1, 0].set_xlabel('Time (s)')
         plt.tight_layout()
 
         if save_path:
             plt.savefig(save_path, dpi=150)
-            print(f"Saved to {save_path}")
         plt.show()
 
 
-    def investigate(self, idx: int, time_delay: int = 12, embedding_dim: int = 7, epsilon_percent: float = 0.05, show_unthresholded: bool = False):
+    def investigate(self, idx: int, time_delay: int = 12, embedding_dim: int = 7,
+                    epsilon_method: str = 'std', epsilon_factor: float = 0.2,
+                    show_unthresholded: bool = False):
         self.plot_signal(idx)
 
         # self.plot_subbands(idx)
 
-        # self.plot_rp(idx, time_delay, embedding_dim, epsilon_percent=epsilon_percent, show_unthresholded=show_unthresholded)
-        #
-        self.plot_subband_rps(idx, epsilon_percent=epsilon_percent, show_unthresholded=show_unthresholded)
-
+        # self.plot
+        self.plot_subband_rps(idx, epsilon_method=epsilon_method, epsilon_factor=epsilon_factor, show_unthresholded=show_unthresholded)
     def quick_compare(self, idx_n, idx_p, time_delay: int = 12, embedding_dim: int = 7, embedding_percent: float = 0.05, show_unthresholded: bool = False):
         self.plot_subbands_comparison(idx_n, idx_p)
         self.plot_rp_comparison(idx_n, idx_p, time_delay=time_delay, embedding_dim=embedding_dim, epsilon_percent=embedding_percent, show_unthresholded=show_unthresholded)
@@ -532,12 +513,20 @@ class PAFVisualizer:
 
 if __name__ == '__main__':
     subband_params = {
+        "original": {"tau": 3, "m": 3, "target_rr": 0.05},
         "D1": {"tau": 6, "m": 7, "target_rr": 0.05},
         "D2": {"tau": 4, "m": 7, "target_rr": 0.05},
         "D3": {"tau": 2, "m": 7, "target_rr": 0.05},
         "D4": {"tau": 2, "m": 7, "target_rr": 0.05},
         "A4": {"tau": 16, "m": 8, "target_rr": 0.05},
     }
+    # subband_params = {
+    #     "D1": {"tau": 3, "m": 3, "target_rr": 0.05},
+    #     "D2": {"tau": 3, "m": 3, "target_rr": 0.05},
+    #     "D3": {"tau":3 , "m": 3, "target_rr": 0.05},
+    #     "D4": {"tau":3, "m": 3, "target_rr": 0.05},
+    #     "A4": {"tau": 3, "m": 3, "target_rr": 0.05},
+    # }
     viz = PAFVisualizer(subband_params=subband_params)
     # indices = viz.get_random_indices(n_normal=1, n_preaf=1)
     # idx_n = indices['normal'][0]
@@ -560,8 +549,10 @@ if __name__ == '__main__':
 
     #TODO observation : normal patients in the p* group have a more recurrent D4 subband compared to normal patients from the non-af n group
 
-    for i in range(0,5):
+    #TODO observation 2: there seems to be more recurrent states in the D4 subband (4-8Hz) for pre_AF signals - but it is similar for chaotic normal signals
+
+    for i in range(0, 2):
         indices = viz.get_random_indices(n_normal=1, n_preaf=1)
         idx_n = indices['normal'][0]
         idx_p = indices['preaf'][0]
-        viz.investigate(idx_p, time_delay=time_delay, embedding_dim=embedding_dim, epsilon_percent=epsilon_percent, show_unthresholded=True)
+        viz.investigate(idx_p, epsilon_method="max_distance", epsilon_factor=0.05, show_unthresholded=True)

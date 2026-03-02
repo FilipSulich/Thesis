@@ -103,8 +103,10 @@ class RQAStatistics:
         result["n_normal"] = len(normal)
         result["preaf_mean"] = float(np.mean(preaf))
         result["preaf_std"] = float(np.std(preaf, ddof=1))
+        result["preaf_median"] = float(np.median(preaf))
         result["normal_mean"] = float(np.mean(normal))
         result["normal_std"] = float(np.std(normal, ddof=1))
+        result["normal_median"] = float(np.median(normal))
 
         # Mann-Whitney U — unpaired, non-parametric
         stat, p_value = mannwhitneyu(preaf, normal, alternative='two-sided')
@@ -128,20 +130,25 @@ class RQAStatistics:
     def print_summary(self, prefix: str = "signal"):
         print(f"\n{'Metric':<30} {'N_pre':>6} {'N_norm':>7} "
               f"{'Pre-AF (mean±std)':>22} {'Normal (mean±std)':>22} "
+              f"{'Pre-AF (median)':>16} {'Normal (median)':>16} "
               f"{'Cohen d':>9} {'P':>8}")
-        print("-" * 110)
+        print("-" * 155)
         for metric in self.RQA_METRICS:
             data = self.compare_groups(metric, prefix)
             if not data:
                 continue
             preaf_str = f"{data['preaf_mean']:.4f}±{data['preaf_std']:.4f}"
             normal_str = f"{data['normal_mean']:.4f}±{data['normal_std']:.4f}"
+            preaf_median_str = f"{data['preaf_median']:.4f}"
+            normal_median_str = f"{data['normal_median']:.4f}"
             print(
                 f"{metric:<30} "
                 f"{data['n_preaf']:>6} "
                 f"{data['n_normal']:>7} "
                 f"{preaf_str:>22} "
                 f"{normal_str:>22} "
+                f"{preaf_median_str:>16} "
+                f"{normal_median_str:>16} "
                 f"{data['cohens_d']:>9.3f} "
                 f"{data['p_value']:>8.4f}"
             )
@@ -186,7 +193,8 @@ class RQAStatistics:
 
         fieldnames = [
             "prefix", "metric", "n_preaf", "n_normal",
-            "preaf_mean", "preaf_std", "normal_mean", "normal_std",
+            "preaf_mean", "preaf_std", "preaf_median",
+            "normal_mean", "normal_std", "normal_median",
             "cohens_d", "p_value"
         ]
 
@@ -208,8 +216,10 @@ class RQAStatistics:
                         "n_normal": data["n_normal"],
                         "preaf_mean": data["preaf_mean"],
                         "preaf_std": data["preaf_std"],
+                        "preaf_median": data["preaf_median"],
                         "normal_mean": data["normal_mean"],
                         "normal_std": data["normal_std"],
+                        "normal_median": data["normal_median"],
                         "cohens_d": data["cohens_d"],
                         "p_value": data["p_value"],
                     })
@@ -247,11 +257,11 @@ class RQAStatistics:
 if __name__ == "__main__":
     # PAF dataset paths
     PAF_OUTPUT_DIR = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/output"
-    paf_multiscale_path = f"{PAF_OUTPUT_DIR}/results_multi_scale_FILTERED.csv"
-    paf_singlescale_path = f"{PAF_OUTPUT_DIR}/results_single_scale_all_clean_new_20_std_param.csv"
+    paf_multiscale_path = f"{PAF_OUTPUT_DIR}/results_multi_scale_all_clean_new_20_std.csv"
+    paf_singlescale_path = f"{PAF_OUTPUT_DIR}/single_scale_10_dist.csv"
 
     # Configuration
-    multi_scale = False
+    multi_scale = True
     csv_path = paf_multiscale_path if multi_scale else paf_singlescale_path
 
     # Check if file exists

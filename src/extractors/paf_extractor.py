@@ -491,8 +491,8 @@ def export_hdf5_to_csv(split: str = 'train', output_path: Optional[Path] = None,
 
 
 if __name__ == '__main__':
-    hdf5_path = OUTPUT_DIR / "paf_segments_all_clean_new_cleaning.h5"
-    csv_path = OUTPUT_DIR / "paf_segments_all_clean_new_cleaning.csv"
+    hdf5_path = OUTPUT_DIR / "paf_segments_all_clean_new_cleaning_min_max_with_upper.h5"
+    csv_path = OUTPUT_DIR / "paf_segments_all_clean_new_cleaning_min_max_with_upper.csv"
 
     extractor = PAFExtractor()
     # export_all_for_rqa saves to HDF5, not CSV
