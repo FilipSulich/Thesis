@@ -127,8 +127,7 @@ class MITBIHCrossAnalysis:
             return
 
         # Plot
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
-                                       gridspec_kw={'height_ratios': [3, 1]})
+        fig, ax1 = plt.subplots(1, 1, figsize=(12, 8))
 
         # Main plot
         ax1.errorbar(lead_times, preaf_means, yerr=preaf_stds,
@@ -140,18 +139,6 @@ class MITBIHCrossAnalysis:
         ax1.set_title(f'{prefix} - {metric} Progression Across Lead Times', fontsize=14, fontweight='bold')
         ax1.legend(fontsize=11)
         ax1.grid(True, alpha=0.3)
-
-        # P-value subplot
-        colors = ['green' if p < 0.05 else 'orange' if p < 0.10 else 'gray' for p in p_values]
-        ax2.bar(lead_times, [-np.log10(p) for p in p_values], color=colors, alpha=0.7, width=3)
-        ax2.axhline(-np.log10(0.05), color='red', linestyle='--', linewidth=1, label='p=0.05')
-        ax2.axhline(-np.log10(0.10), color='orange', linestyle='--', linewidth=1, label='p=0.10')
-        ax2.set_xlabel('Lead Time (minutes before AF)', fontsize=12)
-        ax2.set_ylabel('-log10(p-value)', fontsize=11)
-        ax2.set_xticks(lead_times)
-        ax2.legend(fontsize=9, loc='upper right')
-        ax2.grid(True, alpha=0.3, axis='y')
-
         plt.tight_layout()
 
         if save_path:
@@ -595,6 +582,7 @@ if __name__ == '__main__':
     print("MIT-BIH CROSS-ANALYSIS")
     print("="*80)
 
+    prefix = 'A4'
     # 1. Generate summary report
     print("\n1. Generating summary report...")
     analysis.generate_summary_report(OUTPUT_DIR / 'summary_report.txt')
@@ -602,18 +590,19 @@ if __name__ == '__main__':
     # 2. Plot temporal progression for D4 (most significant subband)
     print("\n2. Plotting temporal progression for D4...")
     analysis.plot_all_metrics_progression(
-        prefix='D4',
+        prefix=prefix,
         save_dir=OUTPUT_DIR,
         significant_only=False
     )
 
     # 3. Plot temporal progression for specific metrics
     print("\n3. Plotting specific metric progressions...")
+
     for metric in ['longest_vertical_line', 'recurrence_rate', 'determinism']:
         analysis.plot_temporal_progression(
             metric=metric,
-            prefix='D4',
-            save_path=OUTPUT_DIR / f'temporal_{metric}_D4.png'
+            prefix=prefix,
+            save_path=OUTPUT_DIR / f'temporal_{metric}_{prefix}.png'
         )
 
     # 4. Compare single-scale vs multi-scale

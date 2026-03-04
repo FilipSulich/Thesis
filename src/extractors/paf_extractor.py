@@ -1,502 +1,838 @@
 """
 PAF (Paroxysmal Atrial Fibrillation) Dataset Extractor
 
-Extracts ECG segments from the PAF Prediction Challenge Database.
+Dataset structure (PhysioNet PAF Prediction Challenge):
+  n* records : normal subjects (no AF)
+  p* records : PAF subjects in pairs
+    odd  (p01, p03, ...): normal rhythm, >45 min from any AF  -> label=0
+    even (p02, p04, ...): immediately precede PAF onset        -> label=1
 
-Dataset structure (from PhysioNet docs):
-- Learning set: 100 records from 48 subjects
-  - n* records: Normal subjects (no documented AF)
-  - p* records: PAF subjects in pairs:
-    - Odd-numbered (p01, p03, ...): Distant from PAF (>45 min from any AF)
-    - Even-numbered (p02, p04, ...): Immediately precede PAF onset
+SWT coefficient ordering (verified by PSD analysis):
+  coeffs[0] -> 4-8 Hz  -> D4
+  coeffs[1] -> 8-16 Hz -> D3
+  coeffs[2] -> 16-32 Hz -> D2
+  coeffs[3] -> 32-64 Hz -> D1
+  A4        -> 0-4 Hz
 
-Labeling scheme:
-- label=1 (pre-AF): Even-numbered p* records (p02, p04, p06, ...)
-- label=0 (normal): All n* records + odd-numbered p* records (p01, p03, ...)
-
-Processing:
-- Extract 12s segments @ 128 Hz
-- Patient-wise split into train/val/test
-- Cleaning (filter, normalize, trim to 10s) applied ONLY to train set
-- Upsample to 250 Hz
-
-Sampling frequency: 128 Hz -> 250 Hz
+Quality check thresholds:
+  Normal segments : max_rr_cv=0.5  (strict — normal rhythm should be regular)
+  Pre-AF segments : max_rr_cv=0.7  (loose — legitimate RR variability before AF onset)
 """
 
 import wfdb
 import numpy as np
 import h5py
+import pandas as pd
 from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Tuple, Optional, Dict, Set
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict
+from collections import defaultdict
 from tqdm import tqdm
-from scipy.signal import resample
 
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_cleaning.data_cleaner import DataCleaner
+from wavelets.stationary_wavelet_transform import SWT
 
-DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
-OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf')
+# =============================================================================
+# Configuration
+# =============================================================================
+
+DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
+OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf_updated')
+HDF5_PATH  = OUTPUT_DIR / 'paf_segments_all_clean_new_cleaning.h5'
 
 SEGMENT_DURATION_SEC = 12
-TRIMMED_DURATION_SEC = 10
-LEAD_INDEX = 0
-ORIGINAL_FS = 128
-TARGET_FS = 128
+SAMPLING_FREQ        = 128
+LEAD_INDEX           = 0
 
-# Split ratios
-TRAIN_RATIO = 0.7
-VAL_RATIO = 0.15
-TEST_RATIO = 0.15
+# Temporal window parameters for pre-AF progression analysis
+WINDOW_DURATION_SEC = 150  # 2.5 minutes
+WINDOWS_PER_PATIENT = 12   # 12 windows = 30 minutes total
+PREAF_RECORD_MIN_DURATION_SEC = 1800  # 30 minutes minimum
 
+# Per-label RR-CV thresholds
+# Pre-AF recordings immediately precede AF onset — increased RR variability
+# is physiologically expected and should not cause rejection.
+MAX_RR_CV_NORMAL = 0.6
+MAX_RR_CV_PREAF  = 0.7
+
+
+# =============================================================================
+# Data containers
+# =============================================================================
 
 @dataclass
 class PAFSegment:
-    """Represents an extracted PAF segment."""
     segment_id: str
     patient_id: str
-    record_id: str
-    signal: np.ndarray
-    sampling_freq: int
-    segment_start_sec: float
-    segment_duration_sec: float
-    lead_index: int
-    lead_name: str
-    label: int  # 1 = pre-AF, 0 = normal
+    record_id:  str
+    signal:     np.ndarray
+    label:      int
+    subbands:   Optional[Dict[str, np.ndarray]] = None
 
+
+@dataclass
+class PAFTemporalWindow:
+    """
+    Temporal window for pre-AF progression analysis.
+
+    Each pre-AF patient contributes 12 matched pairs:
+      - 12 consecutive 2.5-min pre-AF windows from p-even record
+      - 12 random 2.5-min normal windows from p-odd record
+    """
+    window_id: str              # e.g., "paf_p02_w0_l1"
+    patient_id: str             # e.g., "paf_p01"
+    preaf_record_id: str        # p-even record (only set if label=1)
+    normal_record_id: str       # p-odd record (only set if label=0)
+    signal: np.ndarray          # 2.5 min @ 128 Hz = 19,200 samples
+    label: int                  # 0=normal, 1=pre-AF
+    window_index: int           # 0-11 (temporal position in 30-min window)
+    subbands: Optional[Dict[str, np.ndarray]] = None
+
+
+# =============================================================================
+# Extractor
+# =============================================================================
 
 class PAFExtractor:
-    """Extracts labeled segments from the PAF database."""
+    def __init__(self, random_seed: int = 42, enable_subband: bool = False,
+                 swt_level: int = 4, wavelet: str = 'db4'):
+        self.rng            = np.random.default_rng(random_seed)
+        self.cleaner        = DataCleaner(fs=SAMPLING_FREQ)
+        self.enable_subband = enable_subband
+        self.swt_level      = swt_level
+        self.wavelet        = wavelet
+        if enable_subband:
+            self.swt = SWT(wavelet=wavelet)
 
-    def __init__(self):
-        self.data_dir = DATA_DIR
-        self.segment_duration_sec = SEGMENT_DURATION_SEC
-        self.lead_index = LEAD_INDEX
+        # Rejection tracking — populated during extraction, printed in summary
+        self._rejection_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
-    def _get_record_label(self, record_id: str) -> Optional[int]:
-        """Determine label for a record based on its ID."""
+    # ------------------------------------------------------------------
+    # Record metadata
+    # ------------------------------------------------------------------
+
+    def _label(self, record_id: str) -> Optional[int]:
         if record_id.endswith('c') or record_id.startswith('t'):
             return None
-
         if record_id.startswith('n'):
             return 0
-
         if record_id.startswith('p'):
             try:
-                num = int(record_id[1:])
-                return 1 if num % 2 == 0 else 0
+                return 1 if int(record_id[1:]) % 2 == 0 else 0
             except ValueError:
                 return None
-
         return None
 
-    def _get_patient_id(self, record_id: str) -> str:
-        """Get patient ID from record ID."""
+    def _patient_id(self, record_id: str) -> str:
         if record_id.startswith('p'):
-            num = int(record_id[1:])
-            pair_base = ((num - 1) // 2) + 1
+            pair_base = ((int(record_id[1:]) - 1) // 2) + 1
             return f"paf_p{pair_base:02d}"
-        else:
-            return f"paf_{record_id}"
+        return f"paf_{record_id}"
 
-    def get_record_ids(self) -> Dict[str, List[str]]:
-        """Get record IDs organized by category."""
-        all_headers = list(self.data_dir.glob('*.hea'))
+    def _get_all_records(self) -> Dict[str, List[str]]:
         records = {'normal': [], 'preaf': []}
-
-        for hea_file in all_headers:
-            record_id = hea_file.stem
-            label = self._get_record_label(record_id)
-
-            if label is None:
-                continue
-            elif label == 0:
-                records['normal'].append(record_id)
+        for hea in sorted(DATA_DIR.glob('*.hea')):
+            rid   = hea.stem
+            label = self._label(rid)
+            if label == 0:
+                records['normal'].append(rid)
             elif label == 1:
-                records['preaf'].append(record_id)
-
-        for key in records:
-            records[key] = sorted(records[key])
-
+                records['preaf'].append(rid)
         return records
 
-    def get_patient_record_mapping(self) -> Dict[str, List[str]]:
-        """Get mapping of patient_id -> list of record_ids."""
-        records = self.get_record_ids()
-        all_records = records['normal'] + records['preaf']
+    # ------------------------------------------------------------------
+    # Subband decomposition — verified coefficient ordering
+    # ------------------------------------------------------------------
 
-        patient_records = {}
-        for record_id in all_records:
-            patient_id = self._get_patient_id(record_id)
-            if patient_id not in patient_records:
-                patient_records[patient_id] = []
-            patient_records[patient_id].append(record_id)
+    def _decompose_to_subbands(self, signal: np.ndarray) -> Dict[str, Optional[np.ndarray]]:
+        """
+        SWT decomposition with correct frequency labeling.
 
-        return patient_records
+        Verified by PSD analysis:
+          coeffs[0] -> 4-8 Hz  -> D4  (coarsest detail)
+          coeffs[1] -> 8-16 Hz -> D3
+          coeffs[2] -> 16-32 Hz -> D2
+          coeffs[3] -> 32-64 Hz -> D1  (finest detail)
 
-    def create_patient_split(self, seed: int = 42) -> Dict[str, Set[str]]:
-        patient_records = self.get_patient_record_mapping()
+        The loop uses label = D{SWT_LEVEL - i} to map correctly:
+          i=0 -> D4, i=1 -> D3, i=2 -> D2, i=3 -> D1
+        """
+        coeffs = self.swt.decompose(signal, level=self.swt_level)
 
-        # Separate patients by whether they have pre-AF records
-        preaf_patients = []
-        normal_patients = []
+        subbands = {}
 
-        records = self.get_record_ids()
-        preaf_record_ids = set(records['preaf'])
+        # Detail subbands — reversed labeling
+        for i in range(self.swt_level):
+            label  = f"D{self.swt_level - i}"   # i=0->D4, i=1->D3, i=2->D2, i=3->D1
+            zeroed = [(np.zeros_like(c[0]), np.zeros_like(c[1])) for c in coeffs]
+            zeroed[i] = (np.zeros_like(coeffs[i][0]), coeffs[i][1])
+            raw = self.swt.reconstruct(zeroed)
+            subbands[label] = self.cleaner.preprocess_subband(raw)
 
-        for pid, rids in patient_records.items():
-            if any(r in preaf_record_ids for r in rids):
-                preaf_patients.append(pid)
-            else:
-                normal_patients.append(pid)
+        # Approximation subband A4
+        zeroed = [(c[0], np.zeros_like(c[1])) for c in coeffs]
+        raw    = self.swt.reconstruct(zeroed)
+        subbands[f'A{self.swt_level}'] = self.cleaner.preprocess_subband(raw)
 
-        np.random.seed(seed)
-        np.random.shuffle(preaf_patients)
-        np.random.shuffle(normal_patients)
+        return subbands
 
-        def split_list(lst):
-            n = len(lst)
-            n_train = int(n * TRAIN_RATIO)
-            n_val = int(n * VAL_RATIO)
-            return lst[:n_train], lst[n_train:n_train + n_val], lst[n_train + n_val:]
+    # ------------------------------------------------------------------
+    # Segment extraction from one record
+    # ------------------------------------------------------------------
 
-        preaf_train, preaf_val, preaf_test = split_list(preaf_patients)
-        norm_train, norm_val, norm_test = split_list(normal_patients)
-
-        split = {
-            'train': set(preaf_train + norm_train),
-            'val': set(preaf_val + norm_val),
-            'test': set(preaf_test + norm_test),
-        }
-
-        print(f"Patient split: {len(split['train'])} train ({len(preaf_train)} preaf, {len(norm_train)} normal), "
-              f"{len(split['val'])} val, {len(split['test'])} test")
-        return split
-
-    def extract_segments_from_record(
+    def _extract_from_record(
         self,
         record_id: str,
         label: int,
-        num_segments: Optional[int] = None
+        n_segments: int,
     ) -> List[PAFSegment]:
-        """Extract segments from a single record."""
-        record_path = str(self.data_dir / record_id)
-        record = wfdb.rdrecord(record_path)
+        """
+        Extract up to n_segments cleaned segments from one record.
 
-        fs = record.fs
-        signal_length = record.sig_len
-        segment_samples = int(self.segment_duration_sec * fs)
+        Quality check threshold depends on label:
+          label=0 (normal) : max_rr_cv=0.5
+          label=1 (pre-AF) : max_rr_cv=0.7
 
-        max_segments = signal_length // segment_samples
-        if num_segments is not None:
-            max_segments = min(max_segments, num_segments)
+        Rejection reasons are tracked in self._rejection_counts for
+        post-extraction diagnostics.
+        """
+        try:
+            record = wfdb.rdrecord(str(DATA_DIR / record_id))
+        except Exception as e:
+            print(f"  Cannot load {record_id}: {e}")
+            return []
+
+        if record.fs != SAMPLING_FREQ:
+            print(f"  Skipping {record_id}: unexpected fs={record.fs}")
+            return []
+
+        raw_signal  = record.p_signal[:, LEAD_INDEX].astype(np.float32)
+        seg_samples = int(SEGMENT_DURATION_SEC * SAMPLING_FREQ)
+        n_possible  = len(raw_signal) // seg_samples
+
+        if n_possible == 0:
+            return []
+
+        n_extract  = min(n_segments, n_possible)
+        starts     = np.linspace(0, len(raw_signal) - seg_samples, n_extract, dtype=int)
+        patient_id = self._patient_id(record_id)
+        label_name = 'preaf' if label == 1 else 'normal'
+        max_rr_cv  = MAX_RR_CV_PREAF if label == 1 else MAX_RR_CV_NORMAL
 
         segments = []
-        lead_name = record.sig_name[self.lead_index] if self.lead_index < len(record.sig_name) else f"lead_{self.lead_index}"
-        patient_id = self._get_patient_id(record_id)
+        for idx, start in enumerate(starts):
+            raw     = raw_signal[start: start + seg_samples]
+            cleaned, info = self.cleaner.preprocess(raw, check_quality=True,
+                                                     max_rr_cv=max_rr_cv)
+            if cleaned is None:
+                reason = info.get('reason', 'unknown')
+                self._rejection_counts[label_name][reason] += 1
+                continue
 
-        for seg_idx in range(max_segments):
-            start_sample = seg_idx * segment_samples
-            end_sample = start_sample + segment_samples
-
-            signal = record.p_signal[start_sample:end_sample, self.lead_index]
-            segment_id = f"paf_{record_id}_s{seg_idx}_l{self.lead_index}"
+            subbands = None
+            if self.enable_subband:
+                try:
+                    subbands = self._decompose_to_subbands(cleaned)
+                except Exception as e:
+                    print(f"  Subband decomposition failed {record_id}_s{idx}: {e}")
+                    self._rejection_counts[label_name]['subband_error'] += 1
+                    continue
 
             segments.append(PAFSegment(
-                segment_id=segment_id,
+                segment_id=f"paf_{record_id}_s{idx}_l{label}",
                 patient_id=patient_id,
                 record_id=record_id,
-                signal=signal.astype(np.float32),
-                sampling_freq=fs,
-                segment_start_sec=start_sample / fs,
-                segment_duration_sec=self.segment_duration_sec,
-                lead_index=self.lead_index,
-                lead_name=lead_name,
-                label=label
+                signal=cleaned,
+                label=label,
+                subbands=subbands,
             ))
 
         return segments
 
-    def extract_all(self) -> List[PAFSegment]:
-        """Extract segments from all records."""
-        records = self.get_record_ids()
-        print(f"Found {len(records['normal'])} normal, {len(records['preaf'])} pre-AF records")
+    # ------------------------------------------------------------------
+    # Temporal window extraction (for pre-AF progression analysis)
+    # ------------------------------------------------------------------
 
-        all_segments = []
+    def _extract_windows_from_patient_pair(
+        self,
+        preaf_record_id: str,
+        normal_record_id: str,
+        patient_id: str
+    ) -> List[PAFTemporalWindow]:
+        """
+        Extract 12 matched window pairs from one patient.
 
-        for record_id in tqdm(records['normal'], desc="Normal"):
-            try:
-                segments = self.extract_segments_from_record(record_id, label=0)
-                all_segments.extend(segments)
-            except Exception as e:
-                print(f"Error processing {record_id}: {e}")
+        Returns up to 12 matched pairs:
+          - 12 consecutive 2.5-min pre-AF windows from preaf_record_id
+          - 12 random 2.5-min normal windows from normal_record_id
 
-        for record_id in tqdm(records['preaf'], desc="Pre-AF"):
-            try:
-                segments = self.extract_segments_from_record(record_id, label=1)
-                all_segments.extend(segments)
-            except Exception as e:
-                print(f"Error processing {record_id}: {e}")
+        Only returns windows where BOTH pre-AF and normal passed quality check.
+        """
+        # Load pre-AF record (p-even)
+        try:
+            preaf_rec = wfdb.rdrecord(str(DATA_DIR / preaf_record_id))
+        except Exception as e:
+            print(f"  Cannot load pre-AF record {preaf_record_id}: {e}")
+            return []
 
-        return all_segments
+        # Load normal record (p-odd)
+        try:
+            normal_rec = wfdb.rdrecord(str(DATA_DIR / normal_record_id))
+        except Exception as e:
+            print(f"  Cannot load normal record {normal_record_id}: {e}")
+            return []
 
+        if preaf_rec.fs != SAMPLING_FREQ or normal_rec.fs != SAMPLING_FREQ:
+            print(f"  Skipping {patient_id}: unexpected sampling frequency")
+            return []
 
-    def _clean_segments(self, segments: List[PAFSegment], cleaner: DataCleaner, desc: str) -> List[PAFSegment]:
-        cleaned = []
-        rejected = 0
-        for seg in tqdm(segments, desc=desc):
-            sig, info = cleaner.preprocess(seg.signal, check_quality=True)
-            if sig is not None:
-                seg.signal = sig
-                cleaned.append(seg)
+        preaf_signal = preaf_rec.p_signal[:, LEAD_INDEX].astype(np.float32)
+        normal_signal = normal_rec.p_signal[:, LEAD_INDEX].astype(np.float32)
+
+        window_samples = int(WINDOW_DURATION_SEC * SAMPLING_FREQ)
+
+        # Validate pre-AF record length (must have 30 min = 12 windows)
+        preaf_duration_sec = len(preaf_signal) / SAMPLING_FREQ
+        if preaf_duration_sec < PREAF_RECORD_MIN_DURATION_SEC:
+            print(f"  Skipping {patient_id}: pre-AF record too short "
+                  f"({preaf_duration_sec:.1f}s < {PREAF_RECORD_MIN_DURATION_SEC}s)")
+            return []
+
+        # Validate normal record length (must fit 12 non-overlapping windows)
+        normal_min_samples = window_samples * WINDOWS_PER_PATIENT
+        if len(normal_signal) < normal_min_samples:
+            print(f"  Skipping {patient_id}: normal record too short for 12 windows")
+            return []
+
+        # Extract 12 consecutive pre-AF windows
+        preaf_windows = []
+        for i in range(WINDOWS_PER_PATIENT):
+            start = i * window_samples
+            end = start + window_samples
+            raw = preaf_signal[start:end]
+
+            cleaned, info = self.cleaner.preprocess(raw, check_quality=True,
+                                                     max_rr_cv=MAX_RR_CV_PREAF)
+            if cleaned is None:
+                reason = info.get('reason', 'unknown')
+                self._rejection_counts['preaf'][f'window_{reason}'] += 1
+                preaf_windows.append(None)  # Placeholder to maintain indexing
             else:
-                rejected += 1
-        print(f"{desc}: {len(cleaned)} passed, {rejected} rejected")
-        return cleaned
+                preaf_windows.append(cleaned)
 
-    def export_to_hdf5(self) -> Dict:
-        segments = self.extract_all()
-        patient_split = self.create_patient_split()
+        # Extract 12 random non-overlapping normal windows
+        # Generate random start positions for 12 segments
+        max_start = len(normal_signal) - window_samples
+        possible_starts = np.arange(0, max_start - window_samples * (WINDOWS_PER_PATIENT - 1), window_samples)
 
-        train_segs = [s for s in segments if s.patient_id in patient_split['train']]
-        val_segs = [s for s in segments if s.patient_id in patient_split['val']]
-        test_segs = [s for s in segments if s.patient_id in patient_split['test']]
+        if len(possible_starts) < 1:
+            # Fallback: allow overlapping if record is shorter
+            possible_starts = np.arange(0, max_start + 1, window_samples // 2)
 
-        print(f"Segments: {len(train_segs)} train, {len(val_segs)} val, {len(test_segs)} test")
+        # Randomly select starting points ensuring non-overlap
+        selected_starts = []
+        attempts = 0
+        max_attempts = 100
 
-        cleaner = DataCleaner(fs=ORIGINAL_FS, notch_freq=60.0)
-        train_segs = self._clean_segments(train_segs, cleaner, "Cleaning train")
-        val_segs = self._clean_segments(val_segs, cleaner, "Cleaning val")
-        test_segs = self._clean_segments(test_segs, cleaner, "Cleaning test")
+        while len(selected_starts) < WINDOWS_PER_PATIENT and attempts < max_attempts:
+            candidate = self.rng.integers(0, max_start + 1)
+            # Check for overlap with already selected windows
+            overlaps = False
+            for existing_start in selected_starts:
+                if abs(candidate - existing_start) < window_samples:
+                    overlaps = True
+                    break
+            if not overlaps:
+                selected_starts.append(candidate)
+            attempts += 1
 
+        if len(selected_starts) < WINDOWS_PER_PATIENT:
+            print(f"  Warning {patient_id}: could only find {len(selected_starts)} "
+                  f"non-overlapping normal windows")
+
+        normal_windows = []
+        for start in selected_starts[:WINDOWS_PER_PATIENT]:
+            raw = normal_signal[start:start + window_samples]
+            cleaned, info = self.cleaner.preprocess(raw, check_quality=True,
+                                                     max_rr_cv=MAX_RR_CV_NORMAL)
+            if cleaned is None:
+                reason = info.get('reason', 'unknown')
+                self._rejection_counts['normal'][f'window_{reason}'] += 1
+                # Try one replacement attempt
+                replacement_start = self.rng.integers(0, max_start + 1)
+                raw_replacement = normal_signal[replacement_start:replacement_start + window_samples]
+                cleaned, info = self.cleaner.preprocess(raw_replacement, check_quality=True,
+                                                         max_rr_cv=MAX_RR_CV_NORMAL)
+                if cleaned is None:
+                    normal_windows.append(None)
+                else:
+                    normal_windows.append(cleaned)
+            else:
+                normal_windows.append(cleaned)
+
+        # Pad normal_windows if we couldn't get enough
+        while len(normal_windows) < WINDOWS_PER_PATIENT:
+            normal_windows.append(None)
+
+        # Create matched pairs — only where both pre-AF and normal passed
+        windows = []
+        for i in range(WINDOWS_PER_PATIENT):
+            if preaf_windows[i] is None or normal_windows[i] is None:
+                continue
+
+            # Process subbands if enabled
+            preaf_subbands = None
+            normal_subbands = None
+            if self.enable_subband:
+                try:
+                    preaf_subbands = self._decompose_to_subbands(preaf_windows[i])
+                    normal_subbands = self._decompose_to_subbands(normal_windows[i])
+                except Exception as e:
+                    print(f"  Subband decomposition failed {patient_id}_w{i}: {e}")
+                    self._rejection_counts['preaf']['subband_error'] += 1
+                    continue
+
+            # Add pre-AF window
+            windows.append(PAFTemporalWindow(
+                window_id=f"paf_{preaf_record_id}_w{i}_l1",
+                patient_id=patient_id,
+                preaf_record_id=preaf_record_id,
+                normal_record_id="",
+                signal=preaf_windows[i],
+                label=1,
+                window_index=i,
+                subbands=preaf_subbands
+            ))
+
+            # Add matched normal window
+            windows.append(PAFTemporalWindow(
+                window_id=f"paf_{normal_record_id}_w{i}_l0",
+                patient_id=patient_id,
+                preaf_record_id="",
+                normal_record_id=normal_record_id,
+                signal=normal_windows[i],
+                label=0,
+                window_index=i,
+                subbands=normal_subbands
+            ))
+
+        return windows
+
+    # ------------------------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------------------------
+
+    def _print_rejection_summary(self):
+        """Print per-label rejection counts broken down by reason."""
+        print("\n--- Rejection summary ---")
+        for label_name in ['preaf', 'normal']:
+            counts = self._rejection_counts[label_name]
+            if not counts:
+                print(f"  {label_name}: no rejections")
+                continue
+            total = sum(counts.values())
+            print(f"  {label_name}: {total} rejected")
+            for reason, count in sorted(counts.items(), key=lambda x: -x[1]):
+                print(f"    {reason}: {count}")
+        print()
+
+    def print_per_record_yield(self, segments_per_record: int = 50):
+        """
+        Dry run — print how many segments each record produces without saving.
+        Run this first to diagnose which records are causing imbalance.
+        """
+        records = self._get_all_records()
+        self._rejection_counts.clear()
+
+        print("=== Per-record yield (dry run) ===")
+        for label_name, label_int in [('preaf', 1), ('normal', 0)]:
+            print(f"\n{label_name.upper()} records:")
+            record_list = records['preaf'] if label_int == 1 else records['normal']
+            for rid in record_list:
+                segs = self._extract_from_record(rid, label_int, segments_per_record)
+                print(f"  {rid}: {len(segs)} / {segments_per_record} accepted")
+
+        self._print_rejection_summary()
+
+    # ------------------------------------------------------------------
+    # Temporal window extraction - main method
+    # ------------------------------------------------------------------
+
+    def extract_temporal_windows(self) -> List[PAFTemporalWindow]:
+        """
+        Extract temporal windows for pre-AF progression analysis.
+
+        For each pre-AF patient (p-pairs):
+          - Extract 12 consecutive 2.5-min windows from p-even (pre-AF)
+          - Extract 12 random 2.5-min windows from p-odd (normal)
+          - Return matched pairs only (both must pass quality check)
+
+        Returns
+        -------
+        List[PAFTemporalWindow]
+            All temporal windows from all patients, alternating pre-AF/normal pairs.
+        """
+        records = self._get_all_records()
+        self._rejection_counts.clear()
+
+        # Build patient pairs (p-even → p-odd mapping)
+        preaf_records = [r for r in records['preaf'] if r.startswith('p')]
+        patient_pairs = []
+
+        for preaf_rec in preaf_records:
+            # p02 → p01, p04 → p03, etc.
+            preaf_num = int(preaf_rec[1:])
+            normal_num = preaf_num - 1
+            normal_rec = f"p{normal_num:02d}"
+
+            # Verify the normal record exists
+            if normal_rec in records['normal']:
+                patient_id = self._patient_id(preaf_rec)
+                patient_pairs.append((preaf_rec, normal_rec, patient_id))
+
+        print(f"Found {len(patient_pairs)} pre-AF patient pairs")
+        print(f"Extracting {WINDOWS_PER_PATIENT} × 2.5-min windows per patient...")
+        print(f"  Pre-AF  max_rr_cv={MAX_RR_CV_PREAF}")
+        print(f"  Normal  max_rr_cv={MAX_RR_CV_NORMAL}")
+
+        all_windows = []
+        successful_patients = 0
+
+        for preaf_rec, normal_rec, patient_id in tqdm(patient_pairs, desc="Extracting temporal windows"):
+            windows = self._extract_windows_from_patient_pair(preaf_rec, normal_rec, patient_id)
+            if windows:
+                all_windows.extend(windows)
+                # Count successful if at least one matched pair
+                if len(windows) >= 2:
+                    successful_patients += 1
+
+        self._print_rejection_summary()
+
+        n_preaf = sum(w.label == 1 for w in all_windows)
+        n_normal = sum(w.label == 0 for w in all_windows)
+
+        print(f"\nTemporal window extraction complete:")
+        print(f"  Patients with windows: {successful_patients} / {len(patient_pairs)}")
+        print(f"  Pre-AF windows  : {n_preaf}")
+        print(f"  Normal windows  : {n_normal}")
+        print(f"  Matched pairs   : {min(n_preaf, n_normal)}")
+
+        return all_windows
+
+    # ------------------------------------------------------------------
+    # Balanced extraction
+    # ------------------------------------------------------------------
+
+    def extract_balanced(self, segments_per_record: int = 50) -> List[PAFSegment]:
+        """
+        Extract segments ensuring total pre-AF == total normal.
+
+        Strategy:
+          1. Extract from every pre-AF record (p-even).
+          2. For each paired p-odd record, extract same count as its
+             paired p-even produced (within-patient balance).
+          3. Fill remaining normal quota from n* records.
+          4. Cap normal to match pre-AF total exactly.
+        """
+        records = self._get_all_records()
+        self._rejection_counts.clear()
+
+        print(f"Found {len(records['preaf'])} pre-AF records, "
+              f"{len(records['normal'])} normal records")
+        print(f"Extracting up to {segments_per_record} segments per record...")
+        print(f"  Pre-AF  max_rr_cv={MAX_RR_CV_PREAF}")
+        print(f"  Normal  max_rr_cv={MAX_RR_CV_NORMAL}")
+
+        # Step 1: pre-AF segments
+        preaf_segments: List[PAFSegment] = []
+        for rid in tqdm(records['preaf'], desc="Pre-AF records"):
+            segs = self._extract_from_record(rid, label=1,
+                                              n_segments=segments_per_record)
+            preaf_segments.extend(segs)
+
+        total_preaf = len(preaf_segments)
+        print(f"Pre-AF segments accepted: {total_preaf}")
+
+        if total_preaf == 0:
+            self._print_rejection_summary()
+            raise RuntimeError("No pre-AF segments accepted — check data path and thresholds.")
+
+        # Step 2: paired p-odd records
+        preaf_by_patient: Dict[str, int] = {}
+        for seg in preaf_segments:
+            preaf_by_patient[seg.patient_id] = preaf_by_patient.get(seg.patient_id, 0) + 1
+
+        paired_normal: List[PAFSegment] = []
+        p_odd_records = [rid for rid in records['normal'] if rid.startswith('p')]
+        for rid in tqdm(p_odd_records, desc="Paired normal (p-odd)"):
+            patient_id = self._patient_id(rid)
+            n_match    = preaf_by_patient.get(patient_id, segments_per_record)
+            segs       = self._extract_from_record(rid, label=0, n_segments=n_match)
+            paired_normal.extend(segs)
+
+        # Step 3: n* normal records to fill quota
+        n_needed  = total_preaf - len(paired_normal)
+        n_records = [rid for rid in records['normal'] if rid.startswith('n')]
+
+        independent_normal: List[PAFSegment] = []
+        if n_needed > 0 and n_records:
+            per_n_record = max(1, int(np.ceil(n_needed / len(n_records))))
+            for rid in tqdm(n_records, desc="Independent normal (n*)"):
+                if len(independent_normal) >= n_needed:
+                    break
+                segs = self._extract_from_record(rid, label=0, n_segments=per_n_record)
+                independent_normal.extend(segs)
+            independent_normal = independent_normal[:n_needed]
+
+        all_normal = paired_normal + independent_normal
+
+        # Step 4: cap normal to pre-AF total
+        if len(all_normal) > total_preaf:
+            idx        = self.rng.choice(len(all_normal), size=total_preaf, replace=False)
+            all_normal = [all_normal[i] for i in sorted(idx)]
+
+        self._print_rejection_summary()
+
+        print(f"Extraction complete:")
+        print(f"  Pre-AF : {len(preaf_segments)}")
+        print(f"  Normal : {len(all_normal)}")
+        print(f"    paired p-odd  : {len(paired_normal)}")
+        print(f"    n* records    : {len(independent_normal)}")
+
+        return preaf_segments + all_normal
+
+    # ------------------------------------------------------------------
+    # HDF5 export - temporal windows
+    # ------------------------------------------------------------------
+
+    def export_temporal_windows_to_hdf5(self, export_csv: bool = True):
+        """
+        Extract and export temporal windows to HDF5 and CSV.
+
+        Creates:
+          - HDF5: paf_temporal_windows.h5
+          - CSV: temporal_single_scale.csv + subband CSVs if enabled
+        """
+        windows = self.extract_temporal_windows()
+
+        if not windows:
+            print("No temporal windows extracted")
+            return
+
+        n_preaf = sum(w.label == 1 for w in windows)
+        n_normal = sum(w.label == 0 for w in windows)
+
+        hdf5_path = OUTPUT_DIR / 'paf_temporal_windows.h5'
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        output_path = OUTPUT_DIR / 'paf_segments.h5'
 
-        def save_split(f: h5py.File, name: str, segs: List[PAFSegment]):
-            if not segs:
-                return
+        print(f"\nSaving {len(windows)} temporal windows to {hdf5_path}...")
 
-            grp = f.create_group(name)
-            signals = np.stack([s.signal for s in segs])
-            grp.create_dataset('signals', data=signals, dtype='float32',
-                               compression='gzip', compression_opts=4)
-            grp.create_dataset('labels', data=np.array([s.label for s in segs], dtype=np.int8))
-
-            dt_str = h5py.special_dtype(vlen=str)
-            grp.create_dataset('segment_ids', data=[s.segment_id for s in segs], dtype=dt_str)
-            grp.create_dataset('patient_ids', data=[s.patient_id for s in segs], dtype=dt_str)
-            grp.create_dataset('record_ids', data=np.array([s.record_id for s in segs], dtype=h5py.special_dtype(vlen=str)))
-
-            grp.attrs['n_segments'] = len(segs)
-            grp.attrs['n_normal'] = sum(1 for s in segs if s.label == 0)
-            grp.attrs['n_preaf'] = sum(1 for s in segs if s.label == 1)
-            grp.attrs['n_patients'] = len(set(s.patient_id for s in segs))
-
-
-        with h5py.File(output_path, 'w') as f:
-            save_split(f, 'train', train_segs)
-            save_split(f, 'val', val_segs)
-            save_split(f, 'test', test_segs)
-
-            f.attrs['segment_duration_sec'] = TRIMMED_DURATION_SEC
-            f.attrs['sampling_freq'] = TARGET_FS
-            f.attrs['lead_index'] = LEAD_INDEX
-            f.attrs['train_patients'] = list(patient_split['train'])
-            f.attrs['val_patients'] = list(patient_split['val'])
-            f.attrs['test_patients'] = list(patient_split['test'])
-
-        summary = {
-            'train_segments': len(train_segs),
-            'val_segments': len(val_segs),
-            'test_segments': len(test_segs),
-            'train_normal': sum(1 for s in train_segs if s.label == 0),
-            'train_preaf': sum(1 for s in train_segs if s.label == 1),
-            'train_patients': len(patient_split['train']),
-            'val_patients': len(patient_split['val']),
-            'test_patients': len(patient_split['test']),
-        }
-
-        print(f"\nSaved to {output_path}")
-        print(f"  Train: {summary['train_segments']} segments ({summary['train_normal']} normal, {summary['train_preaf']} pre-AF) from {summary['train_patients']} patients")
-        print(f"  Val: {summary['val_segments']} segments from {summary['val_patients']} patients")
-        print(f"  Test: {summary['test_segments']} segments from {summary['test_patients']} patients")
-        print(f"  Signal: {TRIMMED_DURATION_SEC}s @ {TARGET_FS} Hz = {TRIMMED_DURATION_SEC * TARGET_FS} samples")
-
-        return summary
-
-    def export_all_for_rqa(self, path) -> Dict:
-        """Export all records without train/val/test split, for RQA statistical analysis."""
-        segments = self.extract_all()
-
-        cleaner = DataCleaner(fs=ORIGINAL_FS, notch_freq=60.0)
-        cleaned = self._clean_segments(segments, cleaner, "Cleaning all segments") #TODO removed cleaning
-        # cleaned = segments
-
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        output_path = OUTPUT_DIR / path
-
-        n_normal = sum(1 for s in cleaned if s.label == 0)
-        n_preaf = sum(1 for s in cleaned if s.label == 1)
-
-        with h5py.File(output_path, 'w') as f:
-            grp = f.create_group('all')
-            signals = np.stack([s.signal for s in cleaned])
-            grp.create_dataset('signals', data=signals, dtype='float32',
+        with h5py.File(hdf5_path, 'w') as f:
+            grp = f.create_group('temporal_windows')
+            grp.create_dataset('signals',
+                               data=np.stack([w.signal for w in windows]).astype(np.float32),
                                compression='gzip', compression_opts=4)
             grp.create_dataset('labels',
-                               data=np.array([s.label for s in cleaned], dtype=np.int8))
-            dt_str = h5py.special_dtype(vlen=str)
-            grp.create_dataset('segment_ids',
-                               data=[s.segment_id for s in cleaned], dtype=dt_str)
+                               data=np.array([w.label for w in windows], dtype=np.int8))
+            grp.create_dataset('window_indices',
+                               data=np.array([w.window_index for w in windows], dtype=np.int8))
+            grp.create_dataset('window_ids',
+                               data=np.array([w.window_id for w in windows], dtype='S64'))
             grp.create_dataset('patient_ids',
-                               data=[s.patient_id for s in cleaned], dtype=dt_str)
-            grp.create_dataset('record_ids',
-                               data=[s.record_id for s in cleaned], dtype=dt_str)
-            grp.attrs['n_normal'] = n_normal
+                               data=np.array([w.patient_id for w in windows], dtype='S16'))
+            grp.create_dataset('preaf_record_ids',
+                               data=np.array([w.preaf_record_id for w in windows], dtype='S16'))
+            grp.create_dataset('normal_record_ids',
+                               data=np.array([w.normal_record_id for w in windows], dtype='S16'))
+
             grp.attrs['n_preaf'] = n_preaf
+            grp.attrs['n_normal'] = n_normal
+            grp.attrs['sampling_freq'] = SAMPLING_FREQ
+            grp.attrs['window_duration_sec'] = WINDOW_DURATION_SEC
+            grp.attrs['windows_per_patient'] = WINDOWS_PER_PATIENT
 
-        print(f"Saved {len(cleaned)} segments: {n_normal} normal, {n_preaf} pre-AF to {output_path}" )
-        return output_path
+            # Save subbands if enabled
+            if self.enable_subband and any(w.subbands for w in windows):
+                subband_names = [k for k in windows[0].subbands.keys()
+                                 if windows[0].subbands[k] is not None]
+                for sb_name in subband_names:
+                    data = np.stack([w.subbands[sb_name] for w in windows
+                                     if w.subbands and w.subbands.get(sb_name) is not None]
+                                    ).astype(np.float32)
+                    grp.create_dataset(f'subband_{sb_name}', data=data,
+                                       compression='gzip', compression_opts=4)
 
-    def visualize_segments(
-        self,
-        segments: Optional[List[PAFSegment]] = None,
-        n_normal: int = 3,
-        n_preaf: int = 3,
-        save_path: Optional[Path] = None
-    ):
-        """Visualize sample segments from normal and pre-AF classes."""
-        import matplotlib.pyplot as plt
+        print(f"Saved — Pre-AF: {n_preaf}, Normal: {n_normal}")
 
-        if segments is None:
-            records = self.get_record_ids()
-            segments = []
+        if export_csv:
+            self._export_temporal_windows_csv(windows)
 
-            for record_id in records['normal'][:n_normal]:
-                segs = self.extract_segments_from_record(record_id, label=0, num_segments=1)
-                segments.extend(segs)
+    # ------------------------------------------------------------------
+    # HDF5 export - standard segments
+    # ------------------------------------------------------------------
 
-            for record_id in records['preaf'][:n_preaf]:
-                segs = self.extract_segments_from_record(record_id, label=1, num_segments=1)
-                segments.extend(segs)
+    def export_to_hdf5(self, segments_per_record: int = 50, export_csv: bool = True):
+        segments = self.extract_balanced(segments_per_record=segments_per_record)
 
-        normal_segs = [s for s in segments if s.label == 0][:n_normal]
-        preaf_segs = [s for s in segments if s.label == 1][:n_preaf]
+        n_preaf  = sum(s.label == 1 for s in segments)
+        n_normal = sum(s.label == 0 for s in segments)
 
-        n_rows = max(len(normal_segs), len(preaf_segs))
-        fig, axes = plt.subplots(n_rows, 2, figsize=(14, 10))
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"\nSaving {len(segments)} segments to {HDF5_PATH}...")
 
-        if n_rows == 1:
-            axes = axes.reshape(1, -1)
+        with h5py.File(HDF5_PATH, 'w') as f:
+            grp = f.create_group('all')
+            grp.create_dataset('signals',
+                               data=np.stack([s.signal for s in segments]).astype(np.float32),
+                               compression='gzip', compression_opts=4)
+            grp.create_dataset('labels',
+                               data=np.array([s.label for s in segments], dtype=np.int8))
+            grp.create_dataset('segment_ids',
+                               data=np.array([s.segment_id for s in segments], dtype='S64'))
+            grp.create_dataset('patient_ids',
+                               data=np.array([s.patient_id for s in segments], dtype='S16'))
+            grp.create_dataset('record_ids',
+                               data=np.array([s.record_id for s in segments], dtype='S16'))
+            grp.attrs['n_preaf']       = n_preaf
+            grp.attrs['n_normal']      = n_normal
+            grp.attrs['sampling_freq'] = SAMPLING_FREQ
+            grp.attrs['segment_sec']   = SEGMENT_DURATION_SEC
 
-        fig.suptitle('PAF Dataset: Normal vs Pre-AF Segments', fontsize=14, fontweight='bold')
+            if self.enable_subband and any(s.subbands for s in segments):
+                subband_names = [k for k in segments[0].subbands.keys()
+                                 if segments[0].subbands[k] is not None]
+                for sb_name in subband_names:
+                    data = np.stack([s.subbands[sb_name] for s in segments
+                                     if s.subbands and s.subbands.get(sb_name) is not None]
+                                    ).astype(np.float32)
+                    grp.create_dataset(f'subband_{sb_name}', data=data,
+                                       compression='gzip', compression_opts=4)
 
-        for i, seg in enumerate(normal_segs):
-            ax = axes[i, 0]
-            time = np.arange(len(seg.signal)) / seg.sampling_freq
-            ax.plot(time, seg.signal, 'b-', linewidth=0.5)
-            ax.set_ylabel('mV')
-            ax.grid(True, alpha=0.3)
-            title = f'NORMAL (label=0)\n' if i == 0 else ''
-            ax.set_title(f'{title}{seg.record_id} (start: {seg.segment_start_sec:.0f}s)', fontsize=10)
+        print(f"Saved — Pre-AF: {n_preaf}, Normal: {n_normal}")
 
-        for i, seg in enumerate(preaf_segs):
-            ax = axes[i, 1]
-            time = np.arange(len(seg.signal)) / seg.sampling_freq
-            ax.plot(time, seg.signal, 'r-', linewidth=0.5)
-            ax.grid(True, alpha=0.3)
-            title = f'PRE-AF (label=1)\n' if i == 0 else ''
-            ax.set_title(f'{title}{seg.record_id} (start: {seg.segment_start_sec:.0f}s)', fontsize=10)
+        if export_csv:
+            self._export_single_scale_csv(segments)
+            if self.enable_subband:
+                self._export_subbands_csv(segments)
 
-        for i in range(len(normal_segs), n_rows):
-            axes[i, 0].set_visible(False)
-        for i in range(len(preaf_segs), n_rows):
-            axes[i, 1].set_visible(False)
+    # ------------------------------------------------------------------
+    # CSV helpers - temporal windows
+    # ------------------------------------------------------------------
 
-        for ax in axes[-1, :]:
-            if ax.get_visible():
-                ax.set_xlabel('Time (s)')
+    def _export_temporal_windows_csv(self, windows: List[PAFTemporalWindow]):
+        """Export temporal windows to CSV files."""
+        output_dir = OUTPUT_DIR / 'temporal_windows'
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        plt.tight_layout()
+        # Single-scale CSV
+        rows = []
+        for w in tqdm(windows, desc="Exporting temporal single-scale CSV"):
+            row = {
+                'window_id': w.window_id,
+                'patient_id': w.patient_id,
+                'label': w.label,
+                'window_index': w.window_index,
+                'preaf_record_id': w.preaf_record_id,
+                'normal_record_id': w.normal_record_id
+            }
+            for i, v in enumerate(w.signal):
+                row[f's{i}'] = v
+            rows.append(row)
 
-        if save_path:
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            print(f"Saved figure to {save_path}")
-        else:
-            plt.show()
+        pd.DataFrame(rows).to_csv(output_dir / 'temporal_single_scale.csv', index=False)
+        print(f"Saved temporal_single_scale.csv ({len(windows)} windows)")
 
-        return fig
+        # Subband CSVs if enabled
+        if self.enable_subband:
+            valid = [w for w in windows if w.subbands]
+            if valid:
+                subband_names = sorted(valid[0].subbands.keys())
+                for sb_name in tqdm(subband_names, desc="Exporting temporal subband CSVs"):
+                    rows = []
+                    for w in valid:
+                        sb = w.subbands.get(sb_name)
+                        if sb is None:
+                            continue
+                        row = {
+                            'window_id': w.window_id,
+                            'patient_id': w.patient_id,
+                            'label': w.label,
+                            'window_index': w.window_index,
+                            'preaf_record_id': w.preaf_record_id,
+                            'normal_record_id': w.normal_record_id
+                        }
+                        for i, v in enumerate(sb):
+                            row[f's{i}'] = v
+                        rows.append(row)
+                    pd.DataFrame(rows).to_csv(output_dir / f'temporal_{sb_name}.csv', index=False)
+
+                print(f"Saved {len(subband_names)} temporal subband CSVs ({len(valid)} windows each)")
+
+    # ------------------------------------------------------------------
+    # CSV helpers - standard segments
+    # ------------------------------------------------------------------
+
+    def _export_single_scale_csv(self, segments: List[PAFSegment],
+                                  output_dir: Optional[Path] = None):
+        if output_dir is None:
+            output_dir = OUTPUT_DIR / 'subbands'
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        rows = []
+        for seg in tqdm(segments, desc="Exporting single-scale CSV"):
+            row = {'segment_id': seg.segment_id,
+                   'patient_id': seg.patient_id,
+                   'label': seg.label}
+            for i, v in enumerate(seg.signal):
+                row[f's{i}'] = v
+            rows.append(row)
+
+        pd.DataFrame(rows).to_csv(output_dir / 'single_scale.csv', index=False)
+        print(f"Saved single_scale.csv ({len(segments)} segments)")
+
+    def _export_subbands_csv(self, segments: List[PAFSegment],
+                              output_dir: Optional[Path] = None):
+        if output_dir is None:
+            output_dir = OUTPUT_DIR / 'subbands'
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        valid = [s for s in segments if s.subbands]
+        if not valid:
+            return
+
+        subband_names = sorted(valid[0].subbands.keys())
+        for sb_name in tqdm(subband_names, desc="Exporting subband CSVs"):
+            rows = []
+            for seg in valid:
+                sb = seg.subbands.get(sb_name)
+                if sb is None:
+                    continue
+                row = {'segment_id': seg.segment_id,
+                       'patient_id': seg.patient_id,
+                       'label': seg.label}
+                for i, v in enumerate(sb):
+                    row[f's{i}'] = v
+                rows.append(row)
+            pd.DataFrame(rows).to_csv(output_dir / f'{sb_name}.csv', index=False)
+
+        print(f"Saved {len(subband_names)} subband CSVs ({len(valid)} segments each)")
 
 
-def load_paf_hdf5(split: str = 'train', hdf5_path: Optional[Path] = None):
-    # Use provided path or default based on split
-    if hdf5_path is not None:
-        path = Path(hdf5_path)
-    elif split == 'all':
-        path = OUTPUT_DIR / 'paf_segments_all.h5'
-    else:
-        path = OUTPUT_DIR / 'paf_segments.h5'
-
-    with h5py.File(path, 'r') as f:
-        grp = f[split]
-        signals = grp['signals'][:]
-        labels = grp['labels'][:]
-        segment_ids = [s.decode() if isinstance(s, bytes) else s for s in grp['segment_ids'][:]]
-
-        # patient_ids may not exist in 'all' file
-        if 'patient_ids' in grp:
-            patient_ids = [s.decode() if isinstance(s, bytes) else s for s in grp['patient_ids'][:]]
-        else:
-            patient_ids = [''] * len(signals)
-
-        record_ids = [s.decode() if isinstance(s, bytes) else s for s in grp['record_ids'][:]]
-
-    return signals, labels, segment_ids, patient_ids, record_ids
-
-
-
-
-def export_hdf5_to_csv(split: str = 'train', output_path: Optional[Path] = None, hdf5_path: Optional[Path] = None):
-    """
-    Export HDF5 data to CSV format for parameter analysis.
-
-    CSV columns: segment_id, patient_id, record_id, label, s0, s1, ..., sN
-    """
-    import pandas as pd
-
-    signals, labels, segment_ids, patient_ids, record_ids = load_paf_hdf5(split, hdf5_path=hdf5_path)
-
-    if output_path is None:
-        output_path = OUTPUT_DIR / f'paf_{split}.csv'
-
-    rows = []
-    for i in range(len(signals)):
-        row = {
-            'segment_id': segment_ids[i],
-            'patient_id': patient_ids[i],
-            'record_id': record_ids[i],
-            'label': labels[i],
-        }
-        for j, val in enumerate(signals[i]):
-            row[f's{j}'] = val
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    df.to_csv(output_path, index=False)
-    print(f"Exported {len(df)} segments to {output_path}")
-    return df
-
+# =============================================================================
+# Entry point
+# =============================================================================
 
 if __name__ == '__main__':
-    hdf5_path = OUTPUT_DIR / "paf_segments_all_clean_new_cleaning_min_max_with_upper.h5"
-    csv_path = OUTPUT_DIR / "paf_segments_all_clean_new_cleaning_min_max_with_upper.csv"
+    extractor = PAFExtractor(random_seed=42, enable_subband=True)
 
-    extractor = PAFExtractor()
-    # export_all_for_rqa saves to HDF5, not CSV
-    extractor.export_all_for_rqa(path=hdf5_path)
+    # Option 1: Standard segment extraction (random segments from records)
+    # extractor.print_per_record_yield(segments_per_record=50)
+    # extractor.export_to_hdf5(segments_per_record=50, export_csv=True)
 
-    # Now export the HDF5 to CSV
-    export_hdf5_to_csv(split='all', output_path=csv_path, hdf5_path=hdf5_path)
+    # Option 2: Temporal window extraction (12 × 2.5-min windows per patient)
+    # For pre-AF progression analysis with temporal information preserved
+    extractor.export_temporal_windows_to_hdf5(export_csv=True)

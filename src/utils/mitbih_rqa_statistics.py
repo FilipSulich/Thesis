@@ -419,49 +419,345 @@ class MITBIHRQAStatistics:
         print(f"Exported summary to {output_path}")
 
 
+class MITBIHRQAStatisticsAllLeadTimes:
+    """
+    Statistical analysis aggregating all lead times.
+
+    Loads RQA results from multiple lead times and aggregates them:
+    - Pools patient-level means across all lead times
+    - Computes single statistics from the aggregated data
+    """
+
+    RQA_METRICS = MITBIHRQAStatistics.RQA_METRICS
+
+    def __init__(self, data_dir: Path, lead_times: List[int], analysis_type: str = 'single_scale', epsilon_mode: str="max_distance"):
+        """
+        Initialize multi-lead-time statistics analyzer.
+
+        Args:
+            data_dir: Directory containing RQA CSV files
+            lead_times: List of lead times to analyze (e.g., [5, 10, 15, 30, 45])
+            analysis_type: 'single_scale' or 'multi_scale'
+        """
+        self.data_dir = Path(data_dir)
+        self.lead_times = sorted(lead_times)
+        self.analysis_type = analysis_type
+
+        # Load and aggregate all data
+        self.aggregated_data = self._load_and_aggregate_data(epsilon_mode)
+
+        print(f"\nLoaded and aggregated data from {len(self.lead_times)} lead times: {self.lead_times}")
+        print(f"Total data points: {len(self.aggregated_data)}")
+
+    def _load_and_aggregate_data(self, epsilon_mode) -> List[Dict]:
+        """Load data from all lead time CSVs and aggregate into single list."""
+        all_data = []
+
+        for lt in self.lead_times:
+            if self.analysis_type == 'single_scale':
+                csv_path = self.data_dir / f'rqa_single_scale_lt{lt}_{epsilon_mode}.csv'
+            else:
+                csv_path = self.data_dir / f'rqa_multi_scale_lt{lt}_{epsilon_mode}.csv'
+
+            if not csv_path.exists():
+                print(f"Warning: {csv_path} not found, skipping lead time {lt}")
+                continue
+
+            # Load CSV
+            with open(csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    all_data.append(row)
+
+            print(f"  Loaded {lt} min: {csv_path.name}")
+
+        return all_data
+
+    def _aggregate_per_patient(self, metric: str, prefix: str = "signal") -> Dict:
+        """
+        Aggregate RQA metric values per patient across all lead times.
+
+        For each patient, computes mean across all segments and all lead times
+        (pre-AF and normal separately).
+
+        Args:
+            metric: RQA metric name
+            prefix: Metric prefix ('signal', 'D1', 'D2', etc.)
+
+        Returns:
+            dict: patient_id -> {"preaf": [values], "normal": [values]}
+        """
+        col_name = f"{prefix}_{metric}"
+        patient_dict = {}
+
+        for row in self.aggregated_data:
+            if col_name not in row or not row[col_name]:
+                continue
+            if row[col_name].strip().lower() == "nan":
+                continue
+
+            patient_id = row["patient_id"]
+            label = int(row["label"])
+            value = float(row[col_name])
+
+            if patient_id not in patient_dict:
+                patient_dict[patient_id] = {"preaf": [], "normal": []}
+
+            if label == 1:
+                patient_dict[patient_id]["preaf"].append(value)
+            else:
+                patient_dict[patient_id]["normal"].append(value)
+
+        # Average within each patient's group
+        result = {}
+        for patient_id, data in patient_dict.items():
+            if data["preaf"] and data["normal"]:  # Only keep patients with both
+                result[patient_id] = {
+                    "preaf_mean": float(np.mean(data["preaf"])),
+                    "normal_mean": float(np.mean(data["normal"])),
+                }
+
+        return result
+
+    def compare_groups_aggregated(self, metric: str, prefix: str = "signal") -> Dict:
+        """
+        Compare pre-AF vs normal using paired test on aggregated data from all lead times.
+
+        Aggregates patient-level means across all lead times, then performs paired comparison.
+
+        Args:
+            metric: RQA metric name
+            prefix: Metric prefix ('signal', 'D1', etc.)
+
+        Returns:
+            Dictionary with statistics
+        """
+        patient_data = self._aggregate_per_patient(metric, prefix)
+
+        if not patient_data:
+            return {}
+
+        preaf_means = []
+        normal_means = []
+
+        for patient_id, data in patient_data.items():
+            preaf_means.append(data["preaf_mean"])
+            normal_means.append(data["normal_mean"])
+
+        preaf = np.array(preaf_means)
+        normal = np.array(normal_means)
+
+        result = {}
+        result["n_patients"] = len(preaf)
+        result["preaf_mean"] = float(np.mean(preaf))
+        result["preaf_std"] = float(np.std(preaf, ddof=1))
+        result["preaf_median"] = float(np.median(preaf))
+        result["normal_mean"] = float(np.mean(normal))
+        result["normal_std"] = float(np.std(normal, ddof=1))
+        result["normal_median"] = float(np.median(normal))
+
+        # Wilcoxon signed-rank test (paired)
+        try:
+            stat, p_value = wilcoxon(preaf, normal, alternative='two-sided')
+            result["p_value"] = float(p_value)
+            result["test"] = "wilcoxon"
+        except Exception as e:
+            # If Wilcoxon fails, try Mann-Whitney
+            try:
+                stat, p_value = mannwhitneyu(preaf, normal, alternative='two-sided')
+                result["p_value"] = float(p_value)
+                result["test"] = "mannwhitneyu (fallback)"
+            except:
+                result["p_value"] = float('nan')
+                result["test"] = "failed"
+
+        # Paired Cohen's d
+        diff = preaf - normal
+        result["cohens_d"] = float(np.mean(diff) / (np.std(diff, ddof=1) + 1e-8))
+
+        # Store patient-level values
+        result["preaf_values"] = preaf.tolist()
+        result["normal_values"] = normal.tolist()
+        result["patient_ids"] = list(patient_data.keys())
+
+        return result
+
+    def print_summary(self, prefix: str = "signal", significant_only: bool = False, alpha: float = 0.05):
+        """
+        Print summary statistics table (aggregated across all lead times).
+
+        Args:
+            prefix: Metric prefix ('signal', 'D1', etc.)
+            significant_only: If True, only show metrics with p < alpha
+            alpha: Significance level
+        """
+        print(f"\n{'='*100}")
+        print(f"RQA Statistics Summary - Aggregated Across Lead Times {self.lead_times}")
+        print(f"Prefix: {prefix}")
+        print(f"{'='*100}")
+        print(f"{'Metric':<30} {'N':>5} {'Pre-AF (mean±std)':>22} {'Normal (mean±std)':>22} "
+              f"{'Pre-AF (med)':>14} {'Normal (med)':>14} {'Cohen d':>9} {'P-value':>10} {'Test':>12}")
+        print("-" * 100)
+
+        for metric in self.RQA_METRICS:
+            data = self.compare_groups_aggregated(metric, prefix)
+            if not data:
+                continue
+
+            # Skip if not significant and significant_only is True
+            if significant_only and data.get('p_value', 1.0) >= alpha:
+                continue
+
+            preaf_str = f"{data['preaf_mean']:.4f}±{data['preaf_std']:.4f}"
+            normal_str = f"{data['normal_mean']:.4f}±{data['normal_std']:.4f}"
+            preaf_median_str = f"{data['preaf_median']:.4f}"
+            normal_median_str = f"{data['normal_median']:.4f}"
+
+            # Mark significant results
+            p_val = data.get('p_value', float('nan'))
+            p_str = f"{p_val:.4f}"
+            if p_val < 0.001:
+                p_str += " ***"
+            elif p_val < 0.01:
+                p_str += " **"
+            elif p_val < 0.05:
+                p_str += " *"
+
+            print(
+                f"{metric:<30} "
+                f"{data['n_patients']:>5} "
+                f"{preaf_str:>22} "
+                f"{normal_str:>22} "
+                f"{preaf_median_str:>14} "
+                f"{normal_median_str:>14} "
+                f"{data['cohens_d']:>9.3f} "
+                f"{p_str:>10} "
+                f"{data.get('test', 'N/A'):>12}"
+            )
+
+        print("-" * 100)
+        print("Significance: *** p<0.001, ** p<0.01, * p<0.05")
+        print()
+
+    def export_summary_csv(self, prefix: str = "signal", output_path: Optional[Path] = None):
+        """
+        Export summary statistics (aggregated across all lead times) to CSV.
+
+        Args:
+            prefix: Metric prefix
+            output_path: Output CSV path
+        """
+        if output_path is None:
+            output_path = self.data_dir / f'summary_{prefix}_aggregated.csv'
+
+        rows = []
+        for metric in self.RQA_METRICS:
+            data = self.compare_groups_aggregated(metric, prefix)
+            if not data:
+                continue
+
+            row = {
+                'metric': metric,
+                'prefix': prefix,
+                'lead_times': str(self.lead_times),
+                'n_patients': data['n_patients'],
+                'preaf_mean': data['preaf_mean'],
+                'preaf_std': data['preaf_std'],
+                'preaf_median': data['preaf_median'],
+                'normal_mean': data['normal_mean'],
+                'normal_std': data['normal_std'],
+                'normal_median': data['normal_median'],
+                'cohens_d': data['cohens_d'],
+                'p_value': data.get('p_value', float('nan')),
+                'test': data.get('test', 'N/A'),
+            }
+            rows.append(row)
+
+        if not rows:
+            print("No data to export.")
+            return
+
+        with open(output_path, 'w', newline='') as f:
+            fieldnames = rows[0].keys()
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        print(f"Exported aggregated summary to {output_path}")
+
+
 # =============================================================================
 # Main Execution
 # =============================================================================
 
 if __name__ == '__main__':
-    import sys
+    DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/mitbih/results_min_max')
 
-    # Configuration
-    LEAD_TIME = 45
-    DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/mitbih/results')
+    ANALYSIS_MODE = 'all_lead_times'
+    ANALYSIS_TYPE = 'multi_scale'
+    epsilon_mode = "max_distance"
 
-    # Analysis type
-    ANALYSIS_TYPE = 'multi_scale'  # 'single_scale' or 'multi_scale'
-    embedding_dim = 7
-    time_delay = 21
-    path  = "/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/mitbih/results/rqa_multi_scale_lt5_tau_21_embed_7.csv"
-
-    # Input file
     if ANALYSIS_TYPE == 'single_scale':
-        CSV_PATH = DATA_DIR / f'rqa_single_scale_lt{LEAD_TIME}_tau_{time_delay}_embed_{embedding_dim}.csv'
         PREFIXES = ['signal']
     else:
-        CSV_PATH = DATA_DIR / f'rqa_multi_scale_lt{LEAD_TIME}_tau_{time_delay}_embed_{embedding_dim}.csv'
         PREFIXES = ['D1', 'D2', 'D3', 'D4', 'A4']
 
-    print(f"\n{'='*100}")
-    print(f"MIT-BIH RQA Statistical Analysis")
-    print(f"Analysis: {ANALYSIS_TYPE}")
-    print(f"Lead Time: {LEAD_TIME} minutes")
-    print(f"Input: {CSV_PATH}")
-    print(f"{'='*100}\n")
+    if ANALYSIS_MODE == 'single_lead_time':
+        LEAD_TIME = 5
 
-    # Initialize statistics
-    stats = MITBIHRQAStatistics(str(CSV_PATH))
+        if ANALYSIS_TYPE == 'single_scale':
+            CSV_PATH = DATA_DIR / f'rqa_single_scale_lt{LEAD_TIME}_{epsilon_mode}.csv'
+        else:
+            CSV_PATH = DATA_DIR / f'rqa_multi_scale_lt{LEAD_TIME}_{epsilon_mode}.csv'
 
-    # Print summary for each prefix
-    for prefix in PREFIXES:
-        stats.print_summary(prefix=prefix, significant_only=False)
+        print(f"\n{'='*100}")
+        print(f"MIT-BIH RQA Statistical Analysis - Single Lead Time")
+        print(f"Analysis: {ANALYSIS_TYPE}")
+        print(f"Lead Time: {LEAD_TIME} minutes")
+        print(f"Input: {CSV_PATH}")
+        print(f"{'='*100}\n")
 
-        # Export summary
-        stats.export_summary_csv(prefix=prefix)
+        # Initialize statistics
+        stats = MITBIHRQAStatistics(str(CSV_PATH))
 
-        # Plot all metrics
-        # stats.plot_all_metrics(prefix=prefix, save_dir=DATA_DIR / 'plots')
+        # Print summary for each prefix
+        for prefix in PREFIXES:
+            stats.print_summary(prefix=prefix, significant_only=False)
 
-    print("\nStatistical analysis complete!")
+            # Export summary
+            stats.export_summary_csv(prefix=prefix)
+
+            # Plot all metrics
+            # stats.plot_all_metrics(prefix=prefix, save_dir=DATA_DIR / 'plots')
+
+        print("\nStatistical analysis complete!")
+
+    # =============================================================================
+    # All Lead Times Analysis (Aggregated)
+    # =============================================================================
+    elif ANALYSIS_MODE == 'all_lead_times':
+        LEAD_TIMES = [5, 10, 15, 30, 45]
+
+        print(f"\n{'='*100}")
+        print(f"MIT-BIH RQA Statistical Analysis - Aggregated Across All Lead Times")
+        print(f"Analysis: {ANALYSIS_TYPE}")
+        print(f"Lead Times: {LEAD_TIMES}")
+        print(f"Data Dir: {DATA_DIR}")
+        print(f"{'='*100}\n")
+
+        # Initialize all-lead-times statistics
+        stats_all = MITBIHRQAStatisticsAllLeadTimes(
+            data_dir=DATA_DIR,
+            lead_times=LEAD_TIMES,
+            analysis_type=ANALYSIS_TYPE,
+            epsilon_mode=epsilon_mode
+        )
+
+        # Print summary for each prefix
+        for prefix in PREFIXES:
+            stats_all.print_summary(prefix=prefix, significant_only=False)
+
+            # Export summary
+            stats_all.export_summary_csv(prefix=prefix)
+
+        print("\nStatistical analysis (aggregated) complete!")
