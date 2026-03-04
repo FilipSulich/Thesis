@@ -253,26 +253,12 @@ class PAFExtractor:
 
         return segments
 
-    # ------------------------------------------------------------------
-    # Temporal window extraction (for pre-AF progression analysis)
-    # ------------------------------------------------------------------
-
     def _extract_windows_from_patient_pair(
         self,
         preaf_record_id: str,
         normal_record_id: str,
         patient_id: str
     ) -> List[PAFTemporalWindow]:
-        """
-        Extract 12 matched window pairs from one patient.
-
-        Returns up to 12 matched pairs:
-          - 12 consecutive 2.5-min pre-AF windows from preaf_record_id
-          - 12 random 2.5-min normal windows from normal_record_id
-
-        Only returns windows where BOTH pre-AF and normal passed quality check.
-        """
-        # Load pre-AF record (p-even)
         try:
             preaf_rec = wfdb.rdrecord(str(DATA_DIR / preaf_record_id))
         except Exception as e:
@@ -315,7 +301,7 @@ class PAFExtractor:
             end = start + window_samples
             raw = preaf_signal[start:end]
 
-            cleaned, info = self.cleaner.preprocess(raw, check_quality=True,
+            cleaned, info = self.cleaner.preprocess(raw, check_quality=False,
                                                      max_rr_cv=MAX_RR_CV_PREAF)
             if cleaned is None:
                 reason = info.get('reason', 'unknown')
