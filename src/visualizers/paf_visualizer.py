@@ -4,13 +4,9 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 
 import h5py
-
+import matplotlib.pyplot as plt
 import sys
 import os
-
-from scipy.signal import welch
-
-from src.pipeline_paf.pipeline_paf import SWT_LEVEL
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -43,7 +39,6 @@ class PAFVisualizer:
         self.patient_ids = None
         self._load_data()
 
-
     def _load_data(self):
         with h5py.File(self.hdf5_path, 'r') as f:
             grp = f['all']
@@ -67,10 +62,6 @@ class PAFVisualizer:
             'normal': self.rng.choice(normal_idx, min(n_normal, len(normal_idx)), replace=False).tolist(),
             'preaf':  self.rng.choice(preaf_idx,  min(n_preaf,  len(preaf_idx)),  replace=False).tolist(),
         }
-
-    import matplotlib.pyplot as plt
-    from scipy.signal import welch
-
     def decompose_signal(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
         swt    = stationary_wavelet.SWT(wavelet=WAVELET)
         coeffs = swt.decompose(signal, level=4)
@@ -80,7 +71,6 @@ class PAFVisualizer:
         for i in range(SWT_LEVEL):
             zeroed = [(np.zeros_like(c[0]), np.zeros_like(c[1])) for c in coeffs]
             zeroed[i] = (np.zeros_like(coeffs[i][0]), coeffs[i][1])
-            # Reverse: coeffs[0]=D4, coeffs[1]=D3, coeffs[2]=D2, coeffs[3]=D1
             label = f"D{SWT_LEVEL - i}"
             reconstructions[label] = self.cleaner.preprocess_subband(swt.reconstruct(zeroed))
 
@@ -107,8 +97,6 @@ class PAFVisualizer:
         from scipy.spatial.distance import pdist
 
         n_points = len(signal) - (embedding_dim - 1) * time_delay
-        if n_points <= 0:
-            raise ValueError(f"Signal too short: need >{(embedding_dim-1)*time_delay} samples, got {len(signal)}")
 
         embedded = np.array([
             signal[i: i + embedding_dim * time_delay: time_delay]
@@ -195,7 +183,6 @@ class PAFVisualizer:
         return ax
 
     def plot_subbands(self, idx: int, save_path: Optional[Path] = None):
-        """Plot signal and its decomposed subbands (after preprocess_subband)."""
         signal, label, seg_id, pat_id = self.get_signal(idx)
         subbands = self.decompose_signal(signal)
         label_str, color = self._label_meta(label)
@@ -230,7 +217,6 @@ class PAFVisualizer:
         plt.show()
 
     def plot_subbands_comparison(self, idx1: int, idx2: int, save_path: Optional[Path] = None):
-        """Side-by-side subband decomposition for two signals."""
         sig1, label1, seg_id1, _ = self.get_signal(idx1)
         sig2, label2, seg_id2, _ = self.get_signal(idx2)
         sub1 = self.decompose_signal(sig1)
@@ -350,7 +336,6 @@ class PAFVisualizer:
             params = self.subband_params[name]
             tau, m = params['tau'], params['m']
 
-            # Signal plot
             if sub is None:
                 axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
                                 ha='center', va='center', transform=axes[i, 0].transAxes)
@@ -412,10 +397,7 @@ class PAFVisualizer:
         show_unthresholded: bool = False,
     ):
         # self.plot_subbands_comparison(idx_n, idx_p)
-        self.plot_rp_comparison(idx_n, idx_p,
-                                epsilon_method=epsilon_method,
-                                epsilon_factor=epsilon_factor,
-                                show_unthresholded=show_unthresholded)
+        self.plot_rp_comparison(idx_n, idx_p,epsilon_method=epsilon_method,epsilon_factor=epsilon_factor,show_unthresholded=show_unthresholded)
 if __name__ == '__main__':
     subband_params = {
         "original": {"tau": 12,  "m": 7},
@@ -423,13 +405,13 @@ if __name__ == '__main__':
         'D2': {'tau': 2, 'm': 7},
         'D3': {'tau': 3, 'm': 7},
         'D4': {'tau': 6, 'm': 7},
-        'A4': {'tau': 32, 'm': 7},
-        #these are optimal parameters found from the AMI and FNN
+        'A4': {'tau': 20, 'm': 7},
     }
 
 
     viz = PAFVisualizer(subband_params=subband_params, random_seed=42)
     #seed 42 is good
+
     epsilon_method = 'percentile'
     epsilon_factor = 0.05
 
@@ -437,8 +419,7 @@ if __name__ == '__main__':
     idx_n   = indices['normal'][0]
     idx_p   = indices['preaf'][0]
 
-
-    for i in range(1):
+    for i in range(5):
         indices = viz.get_random_indices(n_normal=1, n_preaf=1)
         idx_p   = indices['preaf'][0]
         idx_n = indices['normal'][0]
