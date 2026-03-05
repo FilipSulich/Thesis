@@ -56,29 +56,58 @@ class PAFVisualizer:
         return self.signals[idx], self.labels[idx], self.segment_ids[idx], self.patient_ids[idx]
 
     def get_random_indices(self, n_normal: int = 3, n_preaf: int = 3) -> Dict[str, List[int]]:
+        # Normal segments must come from patients whose label contains '_n' (not pre-af patients)
+        # e.g., 'paf_n01' contains '_n', but 'paf_p01' does not
         normal_idx = np.where(self.labels == 0)[0]
+        normal_idx_filtered = [idx for idx in normal_idx if '_n' in self.patient_ids[idx].lower()]
+
         preaf_idx  = np.where(self.labels == 1)[0]
         return {
-            'normal': self.rng.choice(normal_idx, min(n_normal, len(normal_idx)), replace=False).tolist(),
+            'normal': self.rng.choice(normal_idx_filtered, min(n_normal, len(normal_idx_filtered)), replace=False).tolist(),
             'preaf':  self.rng.choice(preaf_idx,  min(n_preaf,  len(preaf_idx)),  replace=False).tolist(),
         }
     def decompose_signal(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
+        """SWT decomposition with reconstruction for each subband (zeroing out other coefficients)."""
         swt    = stationary_wavelet.SWT(wavelet=WAVELET)
         coeffs = swt.decompose(signal, level=4)
 
         reconstructions = {}
         SWT_LEVEL = len(coeffs)
+
+        # Reconstruct each detail level by zeroing out all other coefficients
         for i in range(SWT_LEVEL):
-            zeroed = [(np.zeros_like(c[0]), np.zeros_like(c[1])) for c in coeffs]
-            zeroed[i] = (np.zeros_like(coeffs[i][0]), coeffs[i][1])
             label = f"D{SWT_LEVEL - i}"
+            # Zero out all coefficients except the one we want
+            zeroed = [(np.zeros_like(c[0]), np.zeros_like(c[1])) for c in coeffs]
+            # Keep only the detail coefficients for this level
+            zeroed[i] = (np.zeros_like(coeffs[i][0]), coeffs[i][1])
             reconstructions[label] = self.cleaner.preprocess_subband(swt.reconstruct(zeroed))
 
-        zeroed  = [(c[0], np.zeros_like(c[1])) for c in coeffs]
-        raw_sub = swt.reconstruct(zeroed)
-        reconstructions["A4"] = self.cleaner.preprocess_subband(raw_sub)
+        # Reconstruct A4 (approximation) by zeroing out all detail coefficients
+        zeroed = [(c[0], np.zeros_like(c[1])) for c in coeffs]
+        reconstructions["A4"] = self.cleaner.preprocess_subband(swt.reconstruct(zeroed))
 
         return reconstructions
+
+    def decompose_signal_coeffs(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
+        """SWT decomposition returning raw coefficients (no reconstruction)."""
+        swt    = stationary_wavelet.SWT(wavelet=WAVELET)
+        coeffs = swt.decompose(signal, level=4)
+
+        coefficients = {}
+        SWT_LEVEL = len(coeffs)
+
+        # Detail coefficients D1-D4
+        for i in range(SWT_LEVEL):
+            label = f"D{SWT_LEVEL - i}"
+            # coeffs[i] is a tuple of (cA, cD), we want the detail coefficients (cD)
+            coefficients[label] = self.cleaner.preprocess_subband(coeffs[i][1])
+
+        # Approximation coefficients A4
+        # coeffs[0] is the highest level, use approximation part (cA)
+        coefficients["A4"] = self.cleaner.preprocess_subband(coeffs[0][0])
+
+        return coefficients
 
     def compute_rp(
         self,
@@ -154,6 +183,167 @@ class PAFVisualizer:
         )
         result = RPComputation.create(settings, verbose=False).run()
         return result.recurrence_matrix_reverse_normalized
+
+    def compute_rp_from_coefficients(
+        self,
+        coefficients: np.ndarray,
+        time_delay: int,
+        embedding_dim: int,
+        epsilon_method: str = 'percentile',
+        epsilon_factor: float = 0.05,
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Compute RP directly from wavelet coefficients without reconstruction.
+
+        Args:
+            coefficients: Wavelet coefficients (1D array)
+            time_delay: Time delay for phase space reconstruction
+            embedding_dim: Embedding dimension
+            epsilon_method: Method for epsilon computation ('percentile', 'max_distance', 'std')
+            epsilon_factor: Factor for epsilon computation
+
+        Returns:
+            Tuple of (recurrence_matrix, epsilon_used)
+        """
+        from pyrqa.time_series import TimeSeries
+        from pyrqa.settings import Settings
+        from pyrqa.analysis_type import Classic
+        from pyrqa.neighbourhood import FixedRadius
+        from pyrqa.metric import EuclideanMetric
+        from pyrqa.computation import RPComputation
+        from scipy.spatial.distance import pdist
+
+        n_points = len(coefficients) - (embedding_dim - 1) * time_delay
+
+        embedded = np.array([
+            coefficients[i: i + embedding_dim * time_delay: time_delay]
+            for i in range(n_points)
+        ])
+
+        if len(embedded) > 2000:
+            idx = np.linspace(0, len(embedded) - 1, 2000, dtype=int)
+            embedded_sub = embedded[idx]
+        else:
+            embedded_sub = embedded
+
+        distances = pdist(embedded_sub, metric='euclidean')
+
+        if epsilon_method == 'percentile':
+            epsilon = np.percentile(distances, epsilon_factor * 100)
+        elif epsilon_method == 'max_distance':
+            epsilon = epsilon_factor * np.max(distances)
+        elif epsilon_method == 'std':
+            epsilon = epsilon_factor * np.std(coefficients)
+        else:
+            raise ValueError(f"Unknown epsilon_method: {epsilon_method}")
+
+        ts = TimeSeries(coefficients, embedding_dimension=embedding_dim, time_delay=time_delay)
+        settings = Settings(
+            time_series=ts,
+            analysis_type=Classic,
+            neighbourhood=FixedRadius(epsilon),
+            similarity_measure=EuclideanMetric,
+            theiler_corrector=1,
+        )
+        result = RPComputation.create(settings, verbose=False).run()
+        return result.recurrence_matrix, epsilon
+
+    def decompose_signal_dwt(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        DWT decomposition with reconstruction for each subband.
+
+        Args:
+            signal: Input signal
+
+        Returns:
+            Dictionary mapping subband names (D1, D2, D3, D4, A4) to reconstructed signals
+        """
+        import pywt
+
+        # Perform 4-level DWT decomposition
+        coeffs = pywt.wavedec(signal, WAVELET, level=4)
+
+        # coeffs format: [cA4, cD4, cD3, cD2, cD1]
+        reconstructions = {}
+
+        # Reconstruct A4 (approximation)
+        coeffs_a4 = [coeffs[0]] + [np.zeros_like(c) for c in coeffs[1:]]
+        rec_a4 = pywt.waverec(coeffs_a4, WAVELET)[:len(signal)]
+        reconstructions['A4'] = self.cleaner.preprocess_subband(rec_a4)
+
+        # Reconstruct detail coefficients (D4, D3, D2, D1)
+        for i in range(1, len(coeffs)):
+            level = 5 - i  # Convert index to level number (D4, D3, D2, D1)
+            label = f"D{level}"
+
+            # Zero out all coefficients except the one we want
+            coeffs_single = [np.zeros_like(coeffs[0])] + [np.zeros_like(c) for c in coeffs[1:]]
+            coeffs_single[i] = coeffs[i]
+
+            # Reconstruct
+            rec = pywt.waverec(coeffs_single, WAVELET)[:len(signal)]
+            reconstructions[label] = self.cleaner.preprocess_subband(rec)
+
+        return reconstructions
+
+    def decompose_signal_dwt_coeffs(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        DWT decomposition returning raw coefficients (no reconstruction).
+
+        Args:
+            signal: Input signal
+
+        Returns:
+            Dictionary mapping subband names (D1, D2, D3, D4, A4) to coefficient arrays
+        """
+        import pywt
+
+        # Perform 4-level DWT decomposition
+        coeffs = pywt.wavedec(signal, WAVELET, level=4)
+
+        # coeffs format: [cA4, cD4, cD3, cD2, cD1]
+        coefficients = {}
+
+        # Approximation coefficients (A4)
+        coefficients['A4'] = self.cleaner.preprocess_subband(coeffs[0])
+
+        # Detail coefficients (D4, D3, D2, D1)
+        for i in range(1, len(coeffs)):
+            level = 5 - i  # Convert index to level number (D4, D3, D2, D1)
+            label = f"D{level}"
+            coefficients[label] = self.cleaner.preprocess_subband(coeffs[i])
+
+        return coefficients
+
+    def compute_rp_from_dwt(
+        self,
+        signal: np.ndarray,
+        subband_name: str,
+        epsilon_method: str = 'percentile',
+        epsilon_factor: float = 0.05,
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Compute RP from DWT-based decomposition for a specific subband.
+
+        Args:
+            signal: Input signal
+            subband_name: Name of subband (D1, D2, D3, D4, A4)
+            epsilon_method: Method for epsilon computation
+            epsilon_factor: Factor for epsilon computation
+
+        Returns:
+            Tuple of (recurrence_matrix, epsilon_used)
+        """
+        # Get DWT coefficients
+        dwt_subbands = self.decompose_signal_dwt(signal)
+        coeffs = dwt_subbands[subband_name]
+
+        # Get parameters for this subband
+        params = self.subband_params[subband_name]
+        tau, m = params['tau'], params['m']
+
+        # Compute RP directly from coefficients
+        return self.compute_rp_from_coefficients(coeffs, tau, m, epsilon_method, epsilon_factor)
 
 
     @staticmethod
@@ -267,6 +457,7 @@ class PAFVisualizer:
         epsilon_factor: float = 0.10,
         show_unthresholded: bool = False,
         save_path: Optional[Path] = None,
+        show: bool = True,
     ):
         sig1, label1, seg_id1, _ = self.get_signal(idx1)
         sig2, label2, seg_id2, _ = self.get_signal(idx2)
@@ -313,7 +504,8 @@ class PAFVisualizer:
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=150)
-        plt.show()
+        if show:
+            plt.show()
 
     def plot_subband_rps(
         self,
@@ -322,6 +514,7 @@ class PAFVisualizer:
         epsilon_factor: float = 0.05,
         show_unthresholded: bool = False,
         save_path: Optional[Path] = None,
+        show: bool = True,
     ):
 
         signal, label, seg_id, pat_id = self.get_signal(idx)
@@ -354,26 +547,39 @@ class PAFVisualizer:
                 axes[i, 0].set_title(f'{label_str} | {seg_id} | {epsilon_method}')
 
             if show_unthresholded:
-                rp_u = self.compute_rp_unthresholded(sub, tau, m)
-                im = axes[i, 1].imshow(rp_u, cmap='viridis', origin='lower', aspect='equal')
-                axes[i, 1].set_title(f'{name} Unthresholded RP | tau={tau}, m={m}')
-                plt.colorbar(im, ax=axes[i, 1], fraction=0.046, pad=0.04)
+                try:
+                    rp_u = self.compute_rp_unthresholded(sub, tau, m)
+                    if rp_u.size > 0:
+                        im = axes[i, 1].imshow(rp_u, cmap='viridis', origin='lower', aspect='equal')
+                        axes[i, 1].set_title(f'{name} Unthresholded RP | tau={tau}, m={m}')
+                        plt.colorbar(im, ax=axes[i, 1], fraction=0.046, pad=0.04)
+                    else:
+                        axes[i, 1].text(0.5, 0.5, f'{name}: empty RP',
+                                        ha='center', va='center', transform=axes[i, 1].transAxes)
+                except (ValueError, Exception) as e:
+                    axes[i, 1].text(0.5, 0.5, f'{name}: RP error\n{str(e)[:30]}',
+                                    ha='center', va='center', transform=axes[i, 1].transAxes)
                 rp_col = 2
             else:
                 rp_col = 1
 
-            rp, epsilon = self.compute_rp(sub, tau, m, epsilon_method, epsilon_factor)
-            rr = self._rr(rp)
-            axes[i, rp_col].imshow(rp, cmap='binary', origin='lower', aspect='equal')
-            axes[i, rp_col].set_title(
-                f'{name} RP | RR={rr:.4f}, eps={epsilon:.4f}, tau={tau}, m={m}'
-            )
+            try:
+                rp, epsilon = self.compute_rp(sub, tau, m, epsilon_method, epsilon_factor)
+                rr = self._rr(rp)
+                axes[i, rp_col].imshow(rp, cmap='binary', origin='lower', aspect='equal')
+                axes[i, rp_col].set_title(
+                    f'{name} RP | RR={rr:.4f}, eps={epsilon:.4f}, tau={tau}, m={m}'
+                )
+            except (ValueError, Exception) as e:
+                axes[i, rp_col].text(0.5, 0.5, f'{name}: RP error\n{str(e)[:30]}',
+                                     ha='center', va='center', transform=axes[i, rp_col].transAxes)
 
         axes[-1, 0].set_xlabel('Time (s)')
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=150)
-        plt.show()
+        if show:
+            plt.show()
 
     def investigate(
         self,
@@ -381,12 +587,14 @@ class PAFVisualizer:
         epsilon_method: str = 'percentile',
         epsilon_factor: float = 0.05,
         show_unthresholded: bool = False,
+        save_path: Optional[Path] = None,
     ):
         # self.plot_signal(idx)
         # self.plot_subbands(idx)
         self.plot_subband_rps(idx, epsilon_method=epsilon_method,
                               epsilon_factor=epsilon_factor,
-                              show_unthresholded=show_unthresholded)
+                              show_unthresholded=show_unthresholded,
+                              save_path=save_path)
 
     def quick_compare(
         self,
@@ -395,9 +603,190 @@ class PAFVisualizer:
         epsilon_method: str = 'percentile',
         epsilon_factor: float = 0.05,
         show_unthresholded: bool = False,
+        save_path: Optional[Path] = None,
     ):
         # self.plot_subbands_comparison(idx_n, idx_p)
-        self.plot_rp_comparison(idx_n, idx_p,epsilon_method=epsilon_method,epsilon_factor=epsilon_factor,show_unthresholded=show_unthresholded)
+        self.plot_rp_comparison(idx_n, idx_p,epsilon_method=epsilon_method,epsilon_factor=epsilon_factor,show_unthresholded=show_unthresholded,save_path=save_path)
+
+    def plot_three_methods_comparison(
+        self,
+        idx: int,
+        epsilon_method: str = 'percentile',
+        epsilon_factor: float = 0.05,
+        save_prefix: Optional[Path] = None,
+    ):
+        """
+        Generate three separate plots for the same signal:
+        1. SWT decomposition + reconstruction -> RPs
+        2. SWT decomposition -> RPs from coefficients directly
+        3. DWT decomposition + reconstruction -> RPs
+
+        Args:
+            idx: Signal index
+            epsilon_method: Epsilon computation method
+            epsilon_factor: Epsilon factor
+            save_prefix: Path prefix for saving (will append _method1.png, _method2.png, _method3.png)
+        """
+        signal, label, seg_id, pat_id = self.get_signal(idx)
+        label_str, color = self._label_meta(label)
+
+        # Method 1: SWT + Reconstruction -> RP
+        print(f"Generating Method 1: SWT + Reconstruction -> RP...")
+        self._plot_method_swt_reconstruction(
+            signal, label_str, seg_id, pat_id, color,
+            epsilon_method, epsilon_factor,
+            save_prefix.parent / f"{save_prefix.name}_method1_swt_recon.png" if save_prefix else None
+        )
+
+        # Method 2: SWT -> Direct RP from coefficients
+        print(f"Generating Method 2: SWT -> Direct RP from coefficients...")
+        self._plot_method_swt_direct(
+            signal, label_str, seg_id, pat_id, color,
+            epsilon_method, epsilon_factor,
+            save_prefix.parent / f"{save_prefix.name}_method2_swt_direct.png" if save_prefix else None
+        )
+
+        # Method 3: DWT + Reconstruction -> RP
+        print(f"Generating Method 3: DWT + Reconstruction -> RP...")
+        self._plot_method_dwt_reconstruction(
+            signal, label_str, seg_id, pat_id, color,
+            epsilon_method, epsilon_factor,
+            save_prefix.parent / f"{save_prefix.name}_method3_dwt_recon.png" if save_prefix else None
+        )
+
+    def _plot_method_swt_reconstruction(
+        self, signal, label_str, seg_id, pat_id, color,
+        epsilon_method, epsilon_factor, save_path
+    ):
+        """Method 1: SWT decomposition + reconstruction -> RPs"""
+        subbands = self.decompose_signal(signal)
+
+        fig, axes = plt.subplots(len(SUBBAND_NAMES), 2, figsize=(12, 3*len(SUBBAND_NAMES)))
+        fig.suptitle(f'Method 1: SWT + Reconstruction -> RP | {label_str} | {seg_id}', fontsize=14)
+
+        for i, name in enumerate(SUBBAND_NAMES):
+            sub = subbands[name]
+            params = self.subband_params[name]
+            tau, m = params['tau'], params['m']
+
+            if sub is None:
+                axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
+                                ha='center', va='center', transform=axes[i, 0].transAxes)
+                axes[i, 0].set_ylabel(name)
+                axes[i, 1].axis('off')
+                continue
+
+            # Plot reconstructed subband
+            t_sub = np.arange(len(sub)) / SAMPLING_FREQ
+            axes[i, 0].plot(t_sub, sub, color=color, linewidth=0.5)
+            axes[i, 0].set_ylabel(f'{name} (reconstructed)')
+            axes[i, 0].grid(True, alpha=0.3)
+
+            # Compute and plot RP
+            try:
+                rp, epsilon = self.compute_rp(sub, tau, m, epsilon_method, epsilon_factor)
+                rr = self._rr(rp)
+                axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
+                axes[i, 1].set_title(f'RR={rr:.4f}, eps={epsilon:.4f}')
+            except Exception as e:
+                axes[i, 1].text(0.5, 0.5, f'RP error\n{str(e)[:30]}',
+                               ha='center', va='center', transform=axes[i, 1].transAxes)
+
+        axes[-1, 0].set_xlabel('Time (s)')
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+            print(f"  Saved: {save_path.name}")
+        plt.close('all')
+
+    def _plot_method_swt_direct(
+        self, signal, label_str, seg_id, pat_id, color,
+        epsilon_method, epsilon_factor, save_path
+    ):
+        """Method 2: SWT decomposition -> Direct RP from coefficients"""
+        coeffs = self.decompose_signal_coeffs(signal)
+
+        fig, axes = plt.subplots(len(SUBBAND_NAMES), 2, figsize=(12, 3*len(SUBBAND_NAMES)))
+        fig.suptitle(f'Method 2: SWT -> Direct RP from Coefficients | {label_str} | {seg_id}', fontsize=14)
+
+        for i, name in enumerate(SUBBAND_NAMES):
+            coeff = coeffs[name]
+            params = self.subband_params[name]
+            tau, m = params['tau'], params['m']
+
+            if coeff is None:
+                axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
+                                ha='center', va='center', transform=axes[i, 0].transAxes)
+                axes[i, 0].set_ylabel(name)
+                axes[i, 1].axis('off')
+                continue
+
+            # Plot coefficients
+            axes[i, 0].plot(coeff, color=color, linewidth=0.5)
+            axes[i, 0].set_ylabel(f'{name} (coefficients)')
+            axes[i, 0].grid(True, alpha=0.3)
+
+            # Compute RP directly from coefficients
+            try:
+                rp, epsilon = self.compute_rp_from_coefficients(coeff, tau, m, epsilon_method, epsilon_factor)
+                rr = self._rr(rp)
+                axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
+                axes[i, 1].set_title(f'RR={rr:.4f}, eps={epsilon:.4f}')
+            except Exception as e:
+                axes[i, 1].text(0.5, 0.5, f'RP error\n{str(e)[:30]}',
+                               ha='center', va='center', transform=axes[i, 1].transAxes)
+
+        axes[-1, 0].set_xlabel('Sample index')
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+            print(f"  Saved: {save_path.name}")
+        plt.close('all')
+
+    def _plot_method_dwt_reconstruction(
+        self, signal, label_str, seg_id, pat_id, color,
+        epsilon_method, epsilon_factor, save_path
+    ):
+        """Method 3: DWT decomposition + reconstruction -> RPs"""
+        subbands = self.decompose_signal_dwt(signal)
+
+        fig, axes = plt.subplots(len(SUBBAND_NAMES), 2, figsize=(12, 3*len(SUBBAND_NAMES)))
+        fig.suptitle(f'Method 3: DWT + Reconstruction -> RP | {label_str} | {seg_id}', fontsize=14)
+
+        for i, name in enumerate(SUBBAND_NAMES):
+            sub = subbands[name]
+            params = self.subband_params[name]
+            tau, m = params['tau'], params['m']
+
+            if sub is None:
+                axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
+                                ha='center', va='center', transform=axes[i, 0].transAxes)
+                axes[i, 0].set_ylabel(name)
+                axes[i, 1].axis('off')
+                continue
+
+            # Plot reconstructed subband
+            t_sub = np.arange(len(sub)) / SAMPLING_FREQ
+            axes[i, 0].plot(t_sub, sub, color=color, linewidth=0.5)
+            axes[i, 0].set_ylabel(f'{name} (reconstructed)')
+            axes[i, 0].grid(True, alpha=0.3)
+
+            # Compute and plot RP
+            try:
+                rp, epsilon = self.compute_rp(sub, tau, m, epsilon_method, epsilon_factor)
+                rr = self._rr(rp)
+                axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
+                axes[i, 1].set_title(f'RR={rr:.4f}, eps={epsilon:.4f}')
+            except Exception as e:
+                axes[i, 1].text(0.5, 0.5, f'RP error\n{str(e)[:30]}',
+                               ha='center', va='center', transform=axes[i, 1].transAxes)
+
+        axes[-1, 0].set_xlabel('Time (s)')
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+            print(f"  Saved: {save_path.name}")
+        plt.close('all')
 if __name__ == '__main__':
     subband_params = {
         "original": {"tau": 12,  "m": 7},
@@ -412,18 +801,52 @@ if __name__ == '__main__':
     viz = PAFVisualizer(subband_params=subband_params, random_seed=42)
     #seed 42 is good
 
+    # Check patient IDs to understand naming convention
+    normal_idx = np.where(viz.labels == 0)[0]
+    print(f"\nSample normal patient IDs:")
+    for i in normal_idx[:10]:
+        print(f"  '{viz.patient_ids[i]}'")
+
+    preaf_idx = np.where(viz.labels == 1)[0]
+    print(f"\nSample pre-AF patient IDs:")
+    for i in preaf_idx[:10]:
+        print(f"  '{viz.patient_ids[i]}'")
+
+    normal_n_patients = [idx for idx in normal_idx if '_n' in viz.patient_ids[idx].lower()]
+    print(f"\nNormal segments from patients with '_n' in ID: {len(normal_n_patients)}")
+
     epsilon_method = 'percentile'
     epsilon_factor = 0.05
 
     indices = viz.get_random_indices(n_normal=1, n_preaf=1)
+    if len(indices['normal']) == 0:
+        print("\nNo normal segments found from patients with IDs starting with 'n*'")
+        print("Exiting...")
+        sys.exit(0)
+
     idx_n   = indices['normal'][0]
     idx_p   = indices['preaf'][0]
 
-    for i in range(5):
-        indices = viz.get_random_indices(n_normal=1, n_preaf=1)
-        idx_p   = indices['preaf'][0]
-        idx_n = indices['normal'][0]
-        viz.quick_compare(idx_n, idx_p,epsilon_method=epsilon_method, epsilon_factor=epsilon_factor)
+    # Create output directory
+    output_dir = Path(__file__).parent.parent.parent / 'outputs' / 'paf_visualizations_3methods'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nSaving plots to: {output_dir}")
 
-        viz.investigate(idx_p,epsilon_method=epsilon_method,epsilon_factor=epsilon_factor, show_unthresholded=True)
-        viz.investigate(idx_n,epsilon_method=epsilon_method,epsilon_factor=epsilon_factor, show_unthresholded=True)
+    # Generate visualizations for a few samples
+    indices = viz.get_random_indices(n_normal=2, n_preaf=2)
+
+    print("\n=== Processing Normal segments ===")
+    for i, idx in enumerate(indices['normal']):
+        sig, label, seg_id, pat_id = viz.get_signal(idx)
+        print(f"\nNormal sample {i+1}: {seg_id} (Patient: {pat_id})")
+        save_prefix = output_dir / f'normal_{i}_{seg_id}'
+        viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
+
+    print("\n=== Processing Pre-AF segments ===")
+    for i, idx in enumerate(indices['preaf']):
+        sig, label, seg_id, pat_id = viz.get_signal(idx)
+        print(f"\nPre-AF sample {i+1}: {seg_id} (Patient: {pat_id})")
+        save_prefix = output_dir / f'preaf_{i}_{seg_id}'
+        viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
+
+    print(f"\n=== All plots saved to: {output_dir} ===")

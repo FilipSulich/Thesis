@@ -1,24 +1,3 @@
-"""
-PAF (Paroxysmal Atrial Fibrillation) Dataset Extractor
-
-Dataset structure (PhysioNet PAF Prediction Challenge):
-  n* records : normal subjects (no AF)
-  p* records : PAF subjects in pairs
-    odd  (p01, p03, ...): normal rhythm, >45 min from any AF  -> label=0
-    even (p02, p04, ...): immediately precede PAF onset        -> label=1
-
-SWT coefficient ordering (verified by PSD analysis):
-  coeffs[0] -> 4-8 Hz  -> D4
-  coeffs[1] -> 8-16 Hz -> D3
-  coeffs[2] -> 16-32 Hz -> D2
-  coeffs[3] -> 32-64 Hz -> D1
-  A4        -> 0-4 Hz
-
-Quality check thresholds:
-  Normal segments : max_rr_cv=0.5  (strict — normal rhythm should be regular)
-  Pre-AF segments : max_rr_cv=0.7  (loose — legitimate RR variability before AF onset)
-"""
-
 import wfdb
 import numpy as np
 import h5py
@@ -36,13 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_cleaning.data_cleaner import DataCleaner
 from wavelets.stationary_wavelet_transform import SWT
 
-# =============================================================================
-# Configuration
-# =============================================================================
 
 DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
 OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf_updated')
-HDF5_PATH  = OUTPUT_DIR / 'paf_segments_all_clean_new_cleaning.h5'
+HDF5_PATH  = OUTPUT_DIR / 'paf_segments_all_clean_new_cleaning_with_lowpass.h5'
 
 SEGMENT_DURATION_SEC = 12
 SAMPLING_FREQ        = 128
@@ -513,16 +489,96 @@ class PAFExtractor:
     # Balanced extraction
     # ------------------------------------------------------------------
 
-    def extract_balanced(self, segments_per_record: int = 50) -> List[PAFSegment]:
+    def extract_all(self, segments_per_record: int = 50) -> List[PAFSegment]:
+        """
+        Extract segments from ALL patients (n* and p*) without balancing or pairing.
+
+        Strategy:
+          1. Extract from all pre-AF records (p-even)
+          2. Extract from all normal records (p-odd + n*)
+          3. No balancing - return all accepted segments
+
+        Parameters
+        ----------
+        segments_per_record : int
+            Number of segments to extract from each record
+
+        Returns
+        -------
+        List[PAFSegment]
+            All extracted segments (not necessarily balanced)
+        """
+        records = self._get_all_records()
+        self._rejection_counts.clear()
+
+        print(f"Found {len(records['preaf'])} pre-AF records, "
+              f"{len(records['normal'])} normal records")
+        print(f"Extracting ALL patients (n* and p*) - NO BALANCING")
+        print(f"Extracting up to {segments_per_record} segments per record...")
+        print(f"  Pre-AF  max_rr_cv={MAX_RR_CV_PREAF}")
+        print(f"  Normal  max_rr_cv={MAX_RR_CV_NORMAL}")
+
+        all_segments: List[PAFSegment] = []
+
+        # Extract from all pre-AF records (p-even)
+        preaf_segments: List[PAFSegment] = []
+        for rid in tqdm(records['preaf'], desc="Pre-AF records (p-even)"):
+            segs = self._extract_from_record(rid, label=1, n_segments=segments_per_record)
+            preaf_segments.extend(segs)
+
+        print(f"Pre-AF segments accepted: {len(preaf_segments)}")
+
+        # Extract from all n* records (healthy subjects)
+        n_records = [rid for rid in records['normal'] if rid.startswith('n')]
+        n_segments: List[PAFSegment] = []
+        for rid in tqdm(n_records, desc="Normal records (n*)"):
+            segs = self._extract_from_record(rid, label=0, n_segments=segments_per_record)
+            n_segments.extend(segs)
+
+        print(f"n* segments accepted: {len(n_segments)}")
+
+        # Extract from all p-odd records (PAF patients, normal rhythm)
+        p_odd_records = [rid for rid in records['normal'] if rid.startswith('p')]
+        p_odd_segments: List[PAFSegment] = []
+        for rid in tqdm(p_odd_records, desc="Normal records (p-odd)"):
+            segs = self._extract_from_record(rid, label=0, n_segments=segments_per_record)
+            p_odd_segments.extend(segs)
+
+        print(f"p-odd segments accepted: {len(p_odd_segments)}")
+
+        all_segments = preaf_segments + n_segments + p_odd_segments
+
+        self._print_rejection_summary()
+
+        print(f"\nExtraction complete:")
+        print(f"  Pre-AF (p-even)  : {len(preaf_segments)}")
+        print(f"  Normal (n*)      : {len(n_segments)}")
+        print(f"  Normal (p-odd)   : {len(p_odd_segments)}")
+        print(f"  Total Normal     : {len(n_segments) + len(p_odd_segments)}")
+        print(f"  Total All        : {len(all_segments)}")
+
+        return all_segments
+
+    def extract_balanced(self, segments_per_record: int = 50,
+                        include_n_records: bool = True,
+                        n_record_proportion: float = 0.3) -> List[PAFSegment]:
         """
         Extract segments ensuring total pre-AF == total normal.
 
         Strategy:
           1. Extract from every pre-AF record (p-even).
-          2. For each paired p-odd record, extract same count as its
-             paired p-even produced (within-patient balance).
-          3. Fill remaining normal quota from n* records.
+          2. Extract from n* records (configurable proportion of normal quota).
+          3. Fill remaining normal quota from paired p-odd records.
           4. Cap normal to match pre-AF total exactly.
+
+        Parameters
+        ----------
+        segments_per_record : int
+            Number of segments to extract from each record
+        include_n_records : bool
+            Whether to include n* (normal subjects) records
+        n_record_proportion : float
+            Proportion of normal quota to reserve for n* records (0.0-1.0)
         """
         records = self._get_all_records()
         self._rejection_counts.clear()
@@ -532,6 +588,8 @@ class PAFExtractor:
         print(f"Extracting up to {segments_per_record} segments per record...")
         print(f"  Pre-AF  max_rr_cv={MAX_RR_CV_PREAF}")
         print(f"  Normal  max_rr_cv={MAX_RR_CV_NORMAL}")
+        if include_n_records:
+            print(f"  Including n* records ({n_record_proportion*100:.0f}% of normal quota)")
 
         # Step 1: pre-AF segments
         preaf_segments: List[PAFSegment] = []
@@ -547,7 +605,25 @@ class PAFExtractor:
             self._print_rejection_summary()
             raise RuntimeError("No pre-AF segments accepted — check data path and thresholds.")
 
-        # Step 2: paired p-odd records
+        # Step 2: n* normal records (independent normal subjects)
+        independent_normal: List[PAFSegment] = []
+        if include_n_records:
+            n_records = [rid for rid in records['normal'] if rid.startswith('n')]
+            n_quota = int(total_preaf * n_record_proportion)
+
+            if n_records and n_quota > 0:
+                per_n_record = max(1, int(np.ceil(n_quota / len(n_records))))
+                for rid in tqdm(n_records, desc="Independent normal (n*)"):
+                    if len(independent_normal) >= n_quota:
+                        break
+                    segs = self._extract_from_record(rid, label=0, n_segments=per_n_record)
+                    independent_normal.extend(segs)
+                independent_normal = independent_normal[:n_quota]
+                print(f"n* segments accepted: {len(independent_normal)} / {n_quota} target")
+
+        # Step 3: paired p-odd records to fill remaining quota
+        n_remaining = total_preaf - len(independent_normal)
+
         preaf_by_patient: Dict[str, int] = {}
         for seg in preaf_segments:
             preaf_by_patient[seg.patient_id] = preaf_by_patient.get(seg.patient_id, 0) + 1
@@ -555,39 +631,29 @@ class PAFExtractor:
         paired_normal: List[PAFSegment] = []
         p_odd_records = [rid for rid in records['normal'] if rid.startswith('p')]
         for rid in tqdm(p_odd_records, desc="Paired normal (p-odd)"):
+            if len(paired_normal) >= n_remaining:
+                break
             patient_id = self._patient_id(rid)
             n_match    = preaf_by_patient.get(patient_id, segments_per_record)
             segs       = self._extract_from_record(rid, label=0, n_segments=n_match)
             paired_normal.extend(segs)
 
-        # Step 3: n* normal records to fill quota
-        n_needed  = total_preaf - len(paired_normal)
-        n_records = [rid for rid in records['normal'] if rid.startswith('n')]
+        paired_normal = paired_normal[:n_remaining]
 
-        independent_normal: List[PAFSegment] = []
-        if n_needed > 0 and n_records:
-            per_n_record = max(1, int(np.ceil(n_needed / len(n_records))))
-            for rid in tqdm(n_records, desc="Independent normal (n*)"):
-                if len(independent_normal) >= n_needed:
-                    break
-                segs = self._extract_from_record(rid, label=0, n_segments=per_n_record)
-                independent_normal.extend(segs)
-            independent_normal = independent_normal[:n_needed]
+        all_normal = independent_normal + paired_normal
 
-        all_normal = paired_normal + independent_normal
-
-        # Step 4: cap normal to pre-AF total
+        # Step 4: cap normal to pre-AF total if exceeded
         if len(all_normal) > total_preaf:
             idx        = self.rng.choice(len(all_normal), size=total_preaf, replace=False)
             all_normal = [all_normal[i] for i in sorted(idx)]
 
         self._print_rejection_summary()
 
-        print(f"Extraction complete:")
+        print(f"\nExtraction complete:")
         print(f"  Pre-AF : {len(preaf_segments)}")
         print(f"  Normal : {len(all_normal)}")
-        print(f"    paired p-odd  : {len(paired_normal)}")
-        print(f"    n* records    : {len(independent_normal)}")
+        print(f"    n* records   : {len(independent_normal)}")
+        print(f"    paired p-odd : {len(paired_normal)}")
 
         return preaf_segments + all_normal
 
@@ -661,8 +727,36 @@ class PAFExtractor:
     # HDF5 export - standard segments
     # ------------------------------------------------------------------
 
-    def export_to_hdf5(self, segments_per_record: int = 50, export_csv: bool = True):
-        segments = self.extract_balanced(segments_per_record=segments_per_record)
+    def export_to_hdf5(self, segments_per_record: int = 50, export_csv: bool = True,
+                      balanced: bool = False,
+                      include_n_records: bool = True, n_record_proportion: float = 0.3):
+        """
+        Extract and export PAF segments to HDF5.
+
+        Parameters
+        ----------
+        segments_per_record : int
+            Number of segments to extract from each record
+        export_csv : bool
+            Whether to export CSV files
+        balanced : bool
+            If True, balance pre-AF and normal counts
+            If False, extract all segments from all patients
+        include_n_records : bool
+            Whether to include n* (normal subjects) records (only for balanced mode)
+        n_record_proportion : float
+            Proportion of normal quota for n* records (only for balanced mode, 0.0-1.0)
+        """
+        if balanced:
+            segments = self.extract_balanced(
+                segments_per_record=segments_per_record,
+                include_n_records=include_n_records,
+                n_record_proportion=n_record_proportion
+            )
+        else:
+            segments = self.extract_all(
+                segments_per_record=segments_per_record
+            )
 
         n_preaf  = sum(s.label == 1 for s in segments)
         n_normal = sum(s.label == 0 for s in segments)
@@ -815,10 +909,25 @@ class PAFExtractor:
 if __name__ == '__main__':
     extractor = PAFExtractor(random_seed=42, enable_subband=True)
 
-    # Option 1: Standard segment extraction (random segments from records)
+    # Dry run to check yields per record
     # extractor.print_per_record_yield(segments_per_record=50)
-    # extractor.export_to_hdf5(segments_per_record=50, export_csv=True)
 
-    # Option 2: Temporal window extraction (12 × 2.5-min windows per patient)
+    # Option 1: Extract ALL segments from ALL patients (n* and p*)
+    extractor.export_to_hdf5(
+        segments_per_record=100,
+        export_csv=True,
+        balanced=False  # Extract all, don't balance
+    )
+
+    # Option 2: Extract with balancing and controlled n* proportion
+    # extractor.export_to_hdf5(
+    #     segments_per_record=100,
+    #     export_csv=True,
+    #     balanced=True,
+    #     include_n_records=True,
+    #     n_record_proportion=0.3  # 30% of normal segments from n* records
+    # )
+
+    # Option 3: Temporal window extraction (12 × 2.5-min windows per patient)
     # For pre-AF progression analysis with temporal information preserved
-    extractor.export_temporal_windows_to_hdf5(export_csv=True)
+    # extractor.export_temporal_windows_to_hdf5(export_csv=True)

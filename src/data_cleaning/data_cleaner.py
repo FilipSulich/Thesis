@@ -136,7 +136,7 @@ class DataCleaner:
     def preprocess(self, signal, check_quality=True, max_rr_cv=0.5):
         signal = signal - np.mean(signal)
         signal = self.highpass_filter(signal)
-        signal = self.lowpass_filter(signal)
+        # signal = self.lowpass_filter(signal)
 
         if check_quality:
             is_good, info = self.quality_check(signal, max_rr_cv=max_rr_cv)
