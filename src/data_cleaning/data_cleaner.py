@@ -20,7 +20,6 @@ class DataCleaner:
     def notch_filter(self):
         pass
 
-
     def highpass_filter(self, signal):
         nyquist = 0.5 * self.fs
         cutoff = self.highpass_cutoff / nyquist
