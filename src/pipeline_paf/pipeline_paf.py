@@ -9,6 +9,9 @@ from tqdm import tqdm
 
 import os
 import sys
+
+from src.lorenz_solver.lorenz import LorenzSolver
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import wavelets.stationary_wavelet_transform as stationary_wavelet
@@ -226,6 +229,11 @@ class PAFPipeline:
         rqa, _ = rp_gen.compute_rqa_binary()
         return RQAWithEpsilon(rqa=rqa, epsilon=epsilon)
 
+    def _run_lorenz_single(self, tau: int, m: int) -> Dict[str, RQAWithEpsilon]:
+        lorenz = LorenzSolver(sigma=10,rho=28.0,beta=8.0/3.0)
+        signal = lorenz.generate_lorenz_signal()
+        return {'signal': self._compute_rqa(signal, tau, m)}
+
     def _run_single_scale(self, signal: np.ndarray) -> Dict[str, RQAWithEpsilon]:
         tau = self.single_scale_params['tau']
         m   = self.single_scale_params['m']
@@ -271,6 +279,26 @@ class PAFPipeline:
 
         return results
 
+    def _run_multi_scale_dwt_direct(
+            self, signal: np.ndarray
+    ) -> Optional[Dict[str, RQAWithEpsilon]]:
+        """Method 2: SWT -> Direct RQA from coefficients"""
+        coeffs = self._decompose_dwt(signal)
+
+        for name in ['D3', 'D4', 'A4']:
+            if coeffs.get(name) is None:
+                return None
+
+        results = {}
+        for name in ANALYSIS_SUBBANDS:
+            coeff = coeffs.get(name)
+            if coeff is None:
+                continue
+            params = self.subband_params[name]
+            results[name] = self._compute_rqa(coeff, params['tau'], params['m'])
+
+        return results
+
     def _run_multi_scale_dwt(
         self, signal: np.ndarray
     ) -> Optional[Dict[str, RQAWithEpsilon]]:
@@ -290,6 +318,7 @@ class PAFPipeline:
             results[name] = self._compute_rqa(sb, params['tau'], params['m'])
 
         return results
+
 
     def run_batch(
         self,
@@ -323,6 +352,7 @@ class PAFPipeline:
             'swt_recon': (self._run_multi_scale, "Multi-scale RQA (SWT+Recon)", False),
             'swt_direct': (self._run_multi_scale_swt_direct, "Multi-scale RQA (SWT Direct)", False),
             'dwt_recon': (self._run_multi_scale_dwt, "Multi-scale RQA (DWT+Recon)", False),
+            'dwt_direct': (self._run_multi_scale_dwt_direct, "Multi-scale RQA (DWT+Recon)", False),
         }
 
         if method not in method_map:
@@ -386,5 +416,8 @@ if __name__ == '__main__':
     # Method 3: DWT + Reconstruction -> RQA
     results_dwt_recon = pipeline.run_batch(method='dwt_recon', filter_patients=True)
     pipeline.results_to_csv(results_dwt_recon, results_dir / 'multi_scale_dwt_recon_rqa.csv')
+
+    results_dwt_direct = pipeline.run_batch(method='dwt_direct', filter_patients=True)
+    pipeline.results_to_csv(results_dwt_direct, results_dir / 'multi_scale_dwt_direct_rqa.csv')
 
     print("done")
