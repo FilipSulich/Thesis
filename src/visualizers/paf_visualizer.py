@@ -13,8 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import wavelets.stationary_wavelet_transform as stationary_wavelet
 from data_cleaning.data_cleaner import DataCleaner
 
-DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf')
-HDF5_PATH  = DATA_DIR / 'paf_segments_all_clean_new_cleaning.h5'
+DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted_clean/paf1')
+HDF5_PATH  = DATA_DIR / 'paf_segments.h5'
+# HDF5_PATH  = DATA_DIR / 'paf_segments_with_quality_check.h5'
 
 SAMPLING_FREQ  = 128
 SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "A4"]
@@ -56,8 +57,6 @@ class PAFVisualizer:
         return self.signals[idx], self.labels[idx], self.segment_ids[idx], self.patient_ids[idx]
 
     def get_random_indices(self, n_normal: int = 3, n_preaf: int = 3) -> Dict[str, List[int]]:
-        # Normal segments must come from patients whose label contains '_n' (not pre-af patients)
-        # e.g., 'paf_n01' contains '_n', but 'paf_p01' does not
         normal_idx = np.where(self.labels == 0)[0]
         normal_idx_filtered = [idx for idx in normal_idx if '_n' in self.patient_ids[idx].lower()]
 
@@ -507,6 +506,64 @@ class PAFVisualizer:
         if show:
             plt.show()
 
+
+    def plot_single_scale_ecg(
+                self,
+                idx: int,
+                normalize: bool = False,
+                detrend: bool = False,
+                save_path: Optional[Path] = None,
+                show: bool = True,
+        ):
+            from scipy.signal import detrend as scipy_detrend
+
+            signal, label, seg_id, pat_id = self.get_signal(idx)
+            label_str, color = self._label_meta(label)
+
+            x = signal.copy()
+
+            # Optional preprocessing (controlled, minimal)
+            if detrend:
+                x = scipy_detrend(x)
+
+            if normalize:
+                x = (x - np.mean(x)) / (np.std(x) + 1e-8)
+
+            t = np.arange(len(x)) / SAMPLING_FREQ
+
+            fig, ax = plt.subplots(figsize=(14, 4))
+
+            ax.plot(t, x, color=color, linewidth=0.7)
+
+            ax.set_title(
+                f'Single-Scale ECG | {label_str} | {seg_id} | Patient: {pat_id}'
+            )
+            ax.set_xlabel('Time (s)')
+            ax.set_ylabel('Amplitude' + (' (normalized)' if normalize else ''))
+
+            ax.grid(True, alpha=0.3)
+
+            # Optional statistics overlay (useful for sanity checks)
+            ax.text(
+                0.99, 0.95,
+                f"mean={np.mean(x):.4f}\nstd={np.std(x):.4f}",
+                transform=ax.transAxes,
+                ha='right',
+                va='top',
+                fontsize=9,
+                family='monospace'
+            )
+
+            plt.tight_layout()
+
+            if save_path:
+                plt.savefig(save_path, dpi=150)
+
+            if show:
+                plt.show()
+
+            return ax
+
     def plot_subband_rps(
         self,
         idx: int,
@@ -799,54 +856,35 @@ if __name__ == '__main__':
 
 
     viz = PAFVisualizer(subband_params=subband_params, random_seed=42)
-    #seed 42 is good
-
-    # Check patient IDs to understand naming convention
-    normal_idx = np.where(viz.labels == 0)[0]
-    print(f"\nSample normal patient IDs:")
-    for i in normal_idx[:10]:
-        print(f"  '{viz.patient_ids[i]}'")
-
-    preaf_idx = np.where(viz.labels == 1)[0]
-    print(f"\nSample pre-AF patient IDs:")
-    for i in preaf_idx[:10]:
-        print(f"  '{viz.patient_ids[i]}'")
-
-    normal_n_patients = [idx for idx in normal_idx if '_n' in viz.patient_ids[idx].lower()]
-    print(f"\nNormal segments from patients with '_n' in ID: {len(normal_n_patients)}")
+    #42,43 seeds are good
 
     epsilon_method = 'percentile'
     epsilon_factor = 0.05
 
     indices = viz.get_random_indices(n_normal=1, n_preaf=1)
-    if len(indices['normal']) == 0:
-        print("\nNo normal segments found from patients with IDs starting with 'n*'")
-        print("Exiting...")
-        sys.exit(0)
 
     idx_n   = indices['normal'][0]
     idx_p   = indices['preaf'][0]
 
-    # Create output directory
     output_dir = Path(__file__).parent.parent.parent / 'outputs' / 'paf_visualizations_3methods'
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nSaving plots to: {output_dir}")
 
-    # Generate visualizations for a few samples
     indices = viz.get_random_indices(n_normal=2, n_preaf=2)
 
-    print("\n=== Processing Normal segments ===")
-    for i, idx in enumerate(indices['normal']):
-        sig, label, seg_id, pat_id = viz.get_signal(idx)
-        print(f"\nNormal sample {i+1}: {seg_id} (Patient: {pat_id})")
-        save_prefix = output_dir / f'normal_{i}_{seg_id}'
-        viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
+    viz.plot_single_scale_ecg(idx_n)
+    viz.plot_single_scale_ecg(idx_p)
 
-    print("\n=== Processing Pre-AF segments ===")
-    for i, idx in enumerate(indices['preaf']):
-        sig, label, seg_id, pat_id = viz.get_signal(idx)
-        print(f"\nPre-AF sample {i+1}: {seg_id} (Patient: {pat_id})")
-        save_prefix = output_dir / f'preaf_{i}_{seg_id}'
-        viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
-
-    print(f"\n=== All plots saved to: {output_dir} ===")
+    # print("\n=== Processing Normal segments ===")
+    # for i, idx in enumerate(indices['normal']):
+    #     sig, label, seg_id, pat_id = viz.get_signal(idx)
+    #     print(f"\nNormal sample {i+1}: {seg_id} (Patient: {pat_id})")
+    #     save_prefix = output_dir / f'normal_{i}_{seg_id}'
+    #     viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
+    #
+    # print("\n=== Processing Pre-AF segments ===")
+    # for i, idx in enumerate(indices['preaf']):
+    #     sig, label, seg_id, pat_id = viz.get_signal(idx)
+    #     print(f"\nPre-AF sample {i+1}: {seg_id} (Patient: {pat_id})")
+    #     save_prefix = output_dir / f'preaf_{i}_{seg_id}'
+    #     viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)

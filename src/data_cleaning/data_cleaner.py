@@ -4,9 +4,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import wavelets.stationary_wavelet_transform as stationary_wavelet
-
-
 class DataCleaner:
     def __init__(self, fs=250, highpass_cutoff=0.5,
                  filter_order=4, swt_denoise=False, swt_level=4):
@@ -20,21 +17,15 @@ class DataCleaner:
         from ecgdetectors import Detectors
         self.detectors = Detectors(fs)
 
+    def notch_filter(self):
+        pass
+
 
     def highpass_filter(self, signal):
         nyquist = 0.5 * self.fs
         cutoff = self.highpass_cutoff / nyquist
         b, a = butter(self.filter_order, cutoff, btype='highpass')
         return filtfilt(b, a, signal)
-
-    def lowpass_filter(self, signal):
-        nyquist = 0.5 * self.fs
-        cutoff = self._lowpass_cutoff_hz / nyquist
-        if cutoff >= 1.0:
-            return signal
-        b, a = butter(self.filter_order, cutoff, btype='lowpass')
-        return filtfilt(b, a, signal)
-
 
     def normalize(self, signal):
         std = np.std(signal)
@@ -49,29 +40,12 @@ class DataCleaner:
             return signal
         return np.clip(signal, mu - n_std * sigma, mu + n_std * sigma)
 
-    def trim_subband_boundaries(self, signal, trim_seconds=None):
-        if trim_seconds is None:
-            trim_seconds = self._boundary_trim_seconds
-        n_trim = int(trim_seconds * self.fs)
-        if 2 * n_trim >= len(signal):
-            return signal
-        return signal[n_trim:-n_trim]
-
     def preprocess_subband(self, subband_signal, clip_std=3, trim_seconds=None):
-        # signal = self.trim_subband_boundaries(subband_signal, trim_seconds)
-        signal = self.clip_subband_outliers(subband_signal, clip_std)
-        if np.var(signal) < 1e-4:
-            return None
-        signal = self.normalize(signal)
+        # signal = self.clip_subband_outliers(subband_signal, clip_std)
+        # if np.var(signal) < 1e-4:
+        #     return None
+        signal = self.normalize(subband_signal)
         return signal
-
-    def trim_to_center(self, signal, target_seconds=10):
-        target_samples = int(target_seconds * self.fs)
-        total_samples = len(signal)
-        if total_samples <= target_samples:
-            return signal
-        start = (total_samples - target_samples) // 2
-        return signal[start:start + target_samples]
 
     def _pan_tompkins_(self, signal):
         r_peaks = self.detectors.pan_tompkins_detector(signal)
@@ -134,9 +108,8 @@ class DataCleaner:
         }
 
     def preprocess(self, signal, check_quality=True, max_rr_cv=0.5):
-        signal = signal - np.mean(signal)
-        signal = self.highpass_filter(signal)
-        # signal = self.lowpass_filter(signal)
+        signal = signal - np.mean(signal) # DC artifact removal
+        signal = self.highpass_filter(signal) #to remove the baseline wander (0.5Hz)
 
         if check_quality:
             is_good, info = self.quality_check(signal, max_rr_cv=max_rr_cv)

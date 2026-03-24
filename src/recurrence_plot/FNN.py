@@ -1,0 +1,97 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.neighbors import NearestNeighbors
+
+
+class FNN:
+    def __init__(self, signal, tau, max_dim=15, r_tol=15.0, a_tol=2.0):
+        self.signal = signal
+        self.tau = tau
+        self.max_dim = max_dim
+        self.r_tol = r_tol  # Rtol threshold (typically 10-50)
+        self.a_tol = a_tol  # Atol threshold (typically 2)
+        self.fnn_percentages = None
+
+    def embed(self, m):
+        """Create m-dimensional time-delay embedding."""
+        n = len(self.signal) - (m - 1) * self.tau
+        embedded = np.array([self.signal[i:i + m * self.tau:self.tau] for i in range(n)])
+        return embedded
+
+    def compute_fnn(self):
+        """Compute False Nearest Neighbors for dimensions 1 to max_dim."""
+        fnn_percentages = []
+
+        for m in range(1, self.max_dim + 1):
+            # Embed in dimension m
+            embedded_m = self.embed(m)
+            n_points = len(embedded_m)
+
+            if n_points < 2:
+                fnn_percentages.append(0.0)
+                continue
+
+            # Embed in dimension m+1
+            embedded_m1 = self.embed(m + 1)
+            n_points_m1 = len(embedded_m1)
+
+            # Truncate m-dimensional embedding to match m+1 size
+            embedded_m_trunc = embedded_m[:n_points_m1]
+
+            # Find nearest neighbor in m-dimensional space
+            nbrs = NearestNeighbors(n_neighbors=2, metric='euclidean').fit(embedded_m_trunc)
+            distances, indices = nbrs.kneighbors(embedded_m_trunc)
+
+            # Get nearest neighbor distances (exclude self at index 0)
+            nn_dist_m = distances[:, 1]
+            nn_indices = indices[:, 1]
+
+            # Compute distances in m+1 dimensional space
+            nn_dist_m1 = np.linalg.norm(embedded_m1 - embedded_m1[nn_indices], axis=1)
+
+            # Calculate ratio increase (avoid division by zero)
+            ratio = np.divide(np.abs(nn_dist_m1 - nn_dist_m), nn_dist_m,
+                            out=np.zeros_like(nn_dist_m), where=nn_dist_m!=0)
+
+            # Calculate standard deviation of signal
+            Ra = np.std(self.signal)
+
+            # Count false nearest neighbors
+            false_neighbors = 0
+            for i in range(len(ratio)):
+                # Criterion 1: Rtol test
+                if ratio[i] > self.r_tol:
+                    false_neighbors += 1
+                # Criterion 2: Atol test
+                elif nn_dist_m1[i] / Ra > self.a_tol:
+                    false_neighbors += 1
+
+            fnn_percent = (false_neighbors / len(ratio)) * 100
+            fnn_percentages.append(fnn_percent)
+
+        self.fnn_percentages = np.array(fnn_percentages)
+        return self.fnn_percentages
+
+    def plot(self):
+        """Plot FNN percentage vs embedding dimension."""
+        if self.fnn_percentages is None:
+            self.compute_fnn()
+
+        dims = np.arange(1, self.max_dim + 1)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(dims, self.fnn_percentages, 'bo-', linewidth=2, markersize=8)
+        ax.set_xlabel('Embedding Dimension', fontsize=12)
+        ax.set_ylabel('False Nearest Neighbors (%)', fontsize=12)
+        ax.set_title(f'FNN vs Dimension (tau={self.tau})', fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim([-5, max(self.fnn_percentages) + 10])
+        plt.show()
+
+    def get_optimal_dimension(self, threshold=5.0):
+        """Return the first dimension where FNN% drops below threshold."""
+        if self.fnn_percentages is None:
+            self.compute_fnn()
+
+        optimal = np.where(self.fnn_percentages < threshold)[0]
+        return optimal[0] + 1 if len(optimal) > 0 else self.max_dim

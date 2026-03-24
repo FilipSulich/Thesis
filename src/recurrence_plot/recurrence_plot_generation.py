@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pyrqa.time_series import TimeSeries
 from pyrqa.settings import Settings
 from pyrqa.analysis_type import Cross, Classic
@@ -15,10 +13,6 @@ class RecurrencePlotGenerator:
         self.unthresholded = unthresholded
         self.epsilon = epsilon
         self.settings_unthreshold = Settings(time_series=self.time_series, analysis_type=Cross, neighbourhood=Unthresholded(),similarity_measure=EuclideanMetric, theiler_corrector=1)
-        print("Using parameters")
-        print(f"Time delay: {time_delay}")
-        print(f"Embedding dim: {embedding_dim}")
-        print(f"Epsilon: {self.epsilon}")
         self.settings = Settings(time_series=self.time_series, analysis_type=Classic, neighbourhood=FixedRadius(epsilon), similarity_measure=EuclideanMetric, theiler_corrector=1)
         self.path = path
 
