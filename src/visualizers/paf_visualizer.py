@@ -872,16 +872,16 @@ if __name__ == '__main__':
 
     indices = viz.get_random_indices(n_normal=2, n_preaf=2)
 
-    viz.plot_single_scale_ecg(idx_n)
-    viz.plot_single_scale_ecg(idx_p)
+    # viz.plot_single_scale_ecg(idx_n)
+    # viz.plot_single_scale_ecg(idx_p)
 
     # print("\n=== Processing Normal segments ===")
-    # for i, idx in enumerate(indices['normal']):
-    #     sig, label, seg_id, pat_id = viz.get_signal(idx)
-    #     print(f"\nNormal sample {i+1}: {seg_id} (Patient: {pat_id})")
-    #     save_prefix = output_dir / f'normal_{i}_{seg_id}'
-    #     viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
-    #
+    for i, idx in enumerate(indices['normal']):
+        sig, label, seg_id, pat_id = viz.get_signal(idx)
+        print(f"\nNormal sample {i+1}: {seg_id} (Patient: {pat_id})")
+        save_prefix = output_dir / f'normal_{i}_{seg_id}'
+        viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
+
     # print("\n=== Processing Pre-AF segments ===")
     # for i, idx in enumerate(indices['preaf']):
     #     sig, label, seg_id, pat_id = viz.get_signal(idx)

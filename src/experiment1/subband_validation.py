@@ -2,8 +2,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy import signal as scipy_signal
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,39 +11,45 @@ from recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 class SubbandValidator:
     def __init__(self):
-        self.FS = 128  # Sampling frequency (Hz)
-        self.N = 512  # Signal length (samples)
-        self.LEVEL = 4  # Wavelet decomposition level
+        self.FS = 128
+        self.N = 512
+        self.LEVEL = 4
         self.WAVELET = 'db4'
 
         self.SUBBAND_FREQS = {
-            'A4': 2,   # 0-4 Hz
-            'D4': 6,   # 4-8 Hz
-            'D3': 12,  # 8-16 Hz
-            'D2': 24,  # 16-32 Hz
-            'D1': 48   # 32-64 Hz
+            'A4': 2,   #D1 0-4 Hz
+            'D4': 6,   #D2 4-8 Hz
+            'D3': 12,  #D3 8-16 Hz
+            'D2': 24,  #D4 16-32 Hz
+            'D1': 48   #A4 32-64 Hz
         }
 
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
-        self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon']
+        self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
         self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_synthetic'
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
+        self._cleanup_pyopencl_lock()
+
+    @staticmethod
+    def _cleanup_pyopencl_lock():
+        try:
+            import glob
+            home = os.path.expanduser("~")
+            lock_pattern = os.path.join(home, "Library/Caches/pyopencl/*/lock")
+            lock_files = glob.glob(lock_pattern)
+            for lock_file in lock_files:
+                try:
+                    os.remove(lock_file)
+                except (OSError, PermissionError):
+                    pass
+        except Exception:
+            pass
+
     def generate_composite_sine(self, random_phase=False):
-        """
-        Generate composite sine signal with one component per subband.
-        All components have equal amplitude (unit amplitude).
-
-        Args:
-            random_phase: If True, add random phase to each component
-
-        Returns:
-            signal: Composite sine signal (N samples)
-        """
         t = np.arange(self.N) / self.FS
         signal = np.zeros(self.N)
 
-        # All components have amplitude = 1 (unit amplitude)
         for band, freq in self.SUBBAND_FREQS.items():
             if random_phase:
                 phase = np.random.uniform(0, 2*np.pi)
@@ -52,12 +57,108 @@ class SubbandValidator:
                 phase = 0
             signal += np.sin(2 * np.pi * freq * t + phase)
 
-        # signal += np.sin(2 * np.pi  * t)
-
         return signal
 
+    def generate_reference_rqa_values(self, save_path=None):
+        if save_path is None:
+            save_path = os.path.join(self.OUTPUT_DIR, 'reference_rqa_values.json')
+
+        reference_values = {}
+        reference_data = {}
+        t = np.arange(self.N) / self.FS
+
+
+        for band, freq in self.SUBBAND_FREQS.items():
+            pure_sine = np.sin(2 * np.pi * freq * t)
+
+            if pure_sine.std() > 0:
+                pure_sine = (pure_sine - pure_sine.mean()) / pure_sine.std()
+
+            tau, m = self.get_analytic_embedding_params(freq)
+
+            epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(
+                pure_sine, tau, m, target_rr=0.1
+            )
+
+            metrics = self.compute_rp_metrics(pure_sine, tau, m, epsilon)
+
+            reference_values[band] = {
+                'freq_hz': freq,
+                'tau': tau,
+                'm': m,
+                'epsilon': epsilon,
+                'DET': float(metrics['DET']),
+                'ENTR': float(metrics['ENTR']),
+                'LAM': float(metrics['LAM']),
+                'RR': float(metrics['RR']),
+                'L_mean_diagonal': float(metrics['L_mean_diagonal']),
+                'L_longest_diagonal': float(metrics['L_longest_diagonal']),
+                'L_longest_vertical': float(metrics['L_longest_vertical']),
+                'TT': float(metrics['TT']),
+            }
+
+            reference_data[band] = {
+                'rp_matrix': metrics['rp_matrix'],
+                'pure_sine': pure_sine
+            }
+
+            print(f"    DET: {metrics['DET']:.4f}, ENTR: {metrics['ENTR']:.4f}, "
+                  f"LAM: {metrics['LAM']:.4f}, TT: {metrics['TT']:.4f}")
+
+        with open(save_path, 'w') as f:
+            json.dump(reference_values, f, indent=2)
+
+        ref_data_path = save_path.replace('.json', '_data.npz')
+        np.savez(ref_data_path, **{
+            f'{band}_rp': reference_data[band]['rp_matrix']
+            for band in self.BAND_NAMES
+        }, **{
+            f'{band}_signal': reference_data[band]['pure_sine']
+            for band in self.BAND_NAMES
+        })
+
+        return reference_values
+
+    def load_reference_rqa_values(self, load_path=None):
+        if load_path is None:
+            load_path = os.path.join(self.OUTPUT_DIR, 'reference_rqa_values.json')
+
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"Reference values file not found: {load_path}")
+
+        with open(load_path, 'r') as f:
+            reference_values = json.load(f)
+
+        return reference_values
+
+    def load_reference_data(self, load_path=None):
+        """
+        Load reference RP matrices and pure sine signals.
+
+        Args:
+            load_path: Path to reference data NPZ file. If None, uses OUTPUT_DIR.
+
+        Returns:
+            Dictionary with reference RP matrices and pure sine signals for each band.
+        """
+        if load_path is None:
+            load_path = os.path.join(self.OUTPUT_DIR, 'reference_rqa_values_data.npz')
+
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"Reference data file not found: {load_path}")
+
+        data = np.load(load_path)
+        reference_data = {}
+
+        for band in self.BAND_NAMES:
+            reference_data[band] = {
+                'rp_matrix': data[f'{band}_rp'],
+                'pure_sine': data[f'{band}_signal']
+            }
+
+        return reference_data
+
     def get_analytic_embedding_params(self, freq):
-        """Get embedding parameters using RecurrencePlotGenerator utilities."""
         tau = RecurrencePlotGenerator.estimate_time_delay_analytic(freq, self.FS)
         m = RecurrencePlotGenerator.estimate_embedding_dim_analytic()
         return tau, m
@@ -110,7 +211,6 @@ class SubbandValidator:
                 'rp_matrix': rp_matrix
             }
         except Exception as e:
-            print(f"Warning: RQA computation failed: {e}")
             return {
                 'DET': 0.0,
                 'ENTR': 0.0,
@@ -123,89 +223,7 @@ class SubbandValidator:
                 'rp_matrix': None
             }
 
-    def find_epsilon_for_target_rr(self, signal, tau, m, target_rr=0.1):
-        """
-        Find epsilon that achieves target recurrence rate using bisection.
-
-        Args:
-            signal: Input signal
-            tau: Embedding delay
-            m: Embedding dimension
-            target_rr: Target recurrence rate
-
-        Returns:
-            epsilon: Threshold value
-        """
-        from scipy.spatial.distance import pdist, squareform
-
-        # Embed signal
-        n = len(signal) - (m - 1) * tau
-        if n < 10:
-            return 0.1
-
-        embedded = np.array([signal[i:i + m * tau:tau] for i in range(n)])
-        distances = squareform(pdist(embedded, metric='euclidean'))
-
-        # Find epsilon range
-        all_dists = distances[np.triu_indices_from(distances, k=1)]
-        eps_min, eps_max = np.percentile(all_dists, 1), np.percentile(all_dists, 20)
-
-        # Bisection search
-        for _ in range(20):
-            eps_mid = (eps_min + eps_max) / 2
-            rp_test = (distances <= eps_mid).astype(int)
-            np.fill_diagonal(rp_test, 0)
-            rr = np.sum(rp_test) / (rp_test.shape[0] * (rp_test.shape[0] - 1))
-
-            if abs(rr - target_rr) < 0.01:
-                break
-
-            if rr < target_rr:
-                eps_min = eps_mid
-            else:
-                eps_max = eps_mid
-
-        return eps_mid
-
-    def compute_dominant_period(self, rp_result):
-        """
-        Compute dominant period from RP diagonal structure using autocorrelation.
-
-        Args:
-            rp_result: RPResult object from pyrqa
-
-        Returns:
-            dominant_lag: Dominant period in samples
-        """
-        if rp_result is None:
-            return 0
-
-        try:
-            # Extract recurrence matrix from RPResult
-            rp_matrix = rp_result.recurrence_matrix_reverse_normalized
-
-            if rp_matrix is None or rp_matrix.size == 0:
-                return 0
-
-            # Sum along diagonals to get recurrence profile
-            n = rp_matrix.shape[0]
-            recurrence_profile = np.array([np.sum(np.diag(rp_matrix, k=i)) for i in range(n)])
-
-            # Autocorrelation of recurrence profile
-            autocorr = np.correlate(recurrence_profile, recurrence_profile, mode='full')
-            autocorr = autocorr[len(autocorr)//2:]  # Keep positive lags only
-
-            # Find dominant lag (ignore lag=0)
-            if len(autocorr) > 1:
-                dominant_lag = np.argmax(autocorr[1:]) + 1
-            else:
-                dominant_lag = 0
-
-            return dominant_lag
-        except:
-            return 0
-
-    def validate_pipeline(self, signal, pipeline_name, reference_epsilons=None):
+    def validate_pipeline(self, signal, pipeline_name, reference_epsilons=None, reference_rqa=None, reference_data=None):
 
         subbands = self.decompose_signal(signal, pipeline_name)
 
@@ -235,16 +253,24 @@ class SubbandValidator:
 
             metrics = self.compute_rp_metrics(subband_signal, tau, m, epsilon)
 
-            dominant_period = self.compute_dominant_period(metrics['rp_matrix'])
+            if reference_data is not None and band in reference_data:
+                ref_data = reference_data[band]
 
-            det_deviation = abs(1.0 - metrics['DET'])  # DET should be 1.0 for pure sine
-            entr_deviation = metrics['ENTR']            # ENTR should be 0.0
-            lam_deviation = metrics['LAM']              # LAM should be 0.0
-            tt_deviation = metrics['TT'] # should be 0
-            longest_diagonal_line_deviation = abs(1 -  metrics['L_longest_diagonal'] / len(subband_signal)) #should approx the length of the signal
-            longest_vertical_line_deviation = metrics['L_longest_vertical'] / len(subband_signal)#should approx the length of the signal
-            period_error_abs = abs(dominant_period - expected_period)
-            period_error_relative = period_error_abs / expected_period
+            if reference_rqa is not None and band in reference_rqa:
+                ref = reference_rqa[band]
+                det_deviation = abs(ref['DET'] - metrics['DET'])
+                entr_deviation = abs(ref['ENTR'] - metrics['ENTR'])
+                lam_deviation = abs(ref['LAM'] - metrics['LAM'])
+                tt_deviation = abs(ref['TT'] - metrics['TT'])
+                longest_diagonal_line_deviation = abs(ref['L_longest_diagonal'] - metrics['L_longest_diagonal']) / len(subband_signal)
+                longest_vertical_line_deviation = abs(ref['L_longest_vertical'] - metrics['L_longest_vertical']) / len(subband_signal)
+            else:
+                det_deviation = abs(1.0 - metrics['DET'])
+                entr_deviation = metrics['ENTR']
+                lam_deviation = metrics['LAM']
+                tt_deviation = metrics['TT']
+                longest_diagonal_line_deviation = abs(1 -  metrics['L_longest_diagonal'] / len(subband_signal)) #should approx the length of the signal
+                longest_vertical_line_deviation = metrics['L_longest_vertical'] / len(subband_signal)#should be 0
 
             results.append({
                 'pipeline': pipeline_name,
@@ -264,16 +290,12 @@ class SubbandValidator:
                 'L_longest_vertical': metrics['L_longest_diagonal'],
                 'TT': metrics['TT'],
 
-                'dominant_period': dominant_period,
-                'expected_period': expected_period,
                 'det_deviation': det_deviation,
                 'entr_deviation': entr_deviation,
                 'lam_deviation': lam_deviation,
                 'tt_deviation' : tt_deviation,
                 'longest_diagonal_deviation': longest_diagonal_line_deviation,
                 'longest_vertical_deviation': longest_vertical_line_deviation,
-                'period_error_abs': period_error_abs,
-                'period_error_relative': period_error_relative
             })
 
         if reference_epsilons is None:
@@ -281,40 +303,21 @@ class SubbandValidator:
         else:
             return pd.DataFrame(results), None
 
-    def validate_with_noise(self, signal, pipeline_name, reference_epsilons, snr_db, n_realizations=50):
-        """
-        Validate pipeline with additive white Gaussian noise.
-
-        Args:
-            signal: Clean composite sine signal
-            pipeline_name: Pipeline to validate
-            reference_epsilons: Dictionary of epsilon values from clean signal
-            snr_db: Signal-to-noise ratio in dB
-            n_realizations: Number of noise realizations
-
-        Returns:
-            results_mean: Mean metrics across realizations
-            results_std: Std metrics across realizations
-        """
+    def validate_with_noise(self, signal, pipeline_name, reference_epsilons, snr_db, n_realizations=50, reference_rqa=None, reference_data=None):
         all_results = []
 
         for _ in range(n_realizations):
-            # Add AWGN
             signal_power = np.mean(signal ** 2)
             noise_power = signal_power / (10 ** (snr_db / 10))
             noise = np.sqrt(noise_power) * np.random.randn(len(signal))
             noisy_signal = signal + noise
 
-            # Validate
-            df, _ = self.validate_pipeline(noisy_signal, pipeline_name, reference_epsilons)
+            df, _ = self.validate_pipeline(noisy_signal, pipeline_name, reference_epsilons, reference_rqa, reference_data)
             all_results.append(df)
 
-        # Concatenate all realizations
         combined = pd.concat(all_results, ignore_index=True)
 
-        # Compute mean and std for each band
-        metric_cols = ['det_deviation', 'entr_deviation', 'lam_deviation', 'tt_deviation',
-                      'longest_diagonal_deviation', 'longest_vertical_deviation', 'period_error_relative']
+        metric_cols = ['det_deviation', 'entr_deviation', 'lam_deviation', 'tt_deviation','longest_diagonal_deviation', 'longest_vertical_deviation']
 
         results_mean = combined.groupby('band')[metric_cols].mean().reset_index()
         results_std = combined.groupby('band')[metric_cols].std().reset_index()
@@ -326,72 +329,41 @@ class SubbandValidator:
 
         return results_mean, results_std
 
-    def run_full_validation(self):
-        """
-        Run complete validation on clean signal and with noise.
+    def run_full_validation(self, use_reference_rqa=True):
+        reference_rqa = None
+        reference_data = None
 
-        Returns:
-            clean_results: Dictionary with clean signal results per pipeline
-            noise_results: Dictionary with noise results per pipeline
-        """
-        print("="*60)
-        print("SUBBAND ISOLATION VALIDATION")
-        print("="*60)
+        if use_reference_rqa:
+            ref_path = os.path.join(self.OUTPUT_DIR, 'reference_rqa_values.json')
+            ref_data_path = os.path.join(self.OUTPUT_DIR, 'reference_rqa_values_data.npz')
 
-        # Generate composite sine signal
-        print("\nGenerating composite sine signal...")
+            if os.path.exists(ref_path):
+                reference_rqa = self.load_reference_rqa_values(ref_path)
+                if os.path.exists(ref_data_path):
+                    reference_data = self.load_reference_data(ref_data_path)
+            else:
+                reference_rqa = self.generate_reference_rqa_values(ref_path)
+                reference_data = self.load_reference_data(ref_data_path)
+
         signal = self.generate_composite_sine()
-        print(f"  Signal length: {self.N} samples")
-        print(f"  Sampling rate: {self.FS} Hz")
-        print(f"  Component frequencies: {list(self.SUBBAND_FREQS.values())} Hz")
-
         clean_results = {}
         reference_epsilons = None
 
-        # Validate clean signal for all pipelines
-        print("\n" + "-"*60)
-        print("CLEAN SIGNAL VALIDATION")
-        print("-"*60)
-
         for pipeline in self.PIPELINES:
-            print(f"\nValidating {pipeline}...")
-
             if pipeline == 'swt_recon':
-                # Use SWT Recon as reference for epsilon values
-                df, epsilons = self.validate_pipeline(signal, pipeline)
+                df, epsilons = self.validate_pipeline(signal, pipeline, reference_rqa=reference_rqa, reference_data=reference_data)
                 reference_epsilons = epsilons
-                print(f"  Reference epsilons: {epsilons}")
             else:
-                # Use reference epsilons from SWT Recon
-                df, _ = self.validate_pipeline(signal, pipeline, reference_epsilons)
+                df, _ = self.validate_pipeline(signal, pipeline, reference_epsilons, reference_rqa, reference_data)
 
             clean_results[pipeline] = df
-
-            # Print summary
-            print(f"\n  {pipeline} Results:")
-            print(f"    Mean DET deviation: {df['det_deviation'].mean():.4f}")
-            print(f"    Mean ENTR deviation: {df['entr_deviation'].mean():.4f}")
-            print(f"    Mean LAM deviation: {df['lam_deviation'].mean():.4f}")
-            print(f"    Mean TT deviation: {df['tt_deviation'].mean():.4f}")
-            print(f"    Mean Longest vertical deviation: {df['longest_vertical_deviation'].mean():.4f}")
-            print(f"    Mean Longest diagonal deviation: {df['longest_diagonal_deviation'].mean():.4f}")
-            print(f"    Mean period error (relative): {df['period_error_relative'].mean():.3f} ({df['period_error_relative'].mean()*100:.1f}%)")
-
-        # Validate with noise
-        print("\n" + "-"*60)
-        print("NOISE ROBUSTNESS VALIDATION")
-        print("-"*60)
 
         noise_results = {}
 
         for snr_db in [20, 10, 5, 1]:
-            print(f"\nSNR = {snr_db} dB (50 realizations)...")
-
             for pipeline in self.PIPELINES:
-                print(f"  Testing {pipeline}...")
-
                 mean_df, std_df = self.validate_with_noise(
-                    signal, pipeline, reference_epsilons, snr_db, n_realizations=50
+                    signal, pipeline, reference_epsilons, snr_db, n_realizations=50, reference_rqa=reference_rqa, reference_data=reference_data
                 )
 
                 noise_results[f"{pipeline}_snr{snr_db}_mean"] = mean_df
@@ -399,197 +371,105 @@ class SubbandValidator:
 
         return clean_results, noise_results, reference_epsilons
 
-    def compute_composite_scores(self, clean_results):
-        """
-        Compute normalized composite scores for each pipeline.
-        Excludes A4 LAM (physical artifact) and uses relative period error.
-
-        Args:
-            clean_results: Dictionary with clean signal results
-
-        Returns:
-            DataFrame with composite scores
-        """
-        # Combine all results
-        all_dfs = []
-        for pipeline, df in clean_results.items():
-            all_dfs.append(df)
-
-        combined = pd.concat(all_dfs, ignore_index=True)
-
-        # Exclude A4 LAM from scoring (physical artifact, not pipeline issue)
-        combined_filtered = combined.copy()
-        combined_filtered.loc[combined_filtered['band'] == 'A4', 'lam_deviation'] = np.nan
-
-        # Use relative period error (normalized by expected period)
-        metric_cols = ['det_deviation', 'entr_deviation', 'lam_deviation', 'period_error_relative']
-
-        normalized = combined_filtered.copy()
-        for col in metric_cols:
-            # Skip NaN values when normalizing
-            valid_vals = combined_filtered[col].dropna()
-            if len(valid_vals) > 0:
-                min_val = valid_vals.min()
-                max_val = valid_vals.max()
-                if max_val > min_val:
-                    normalized[f'{col}_norm'] = (combined_filtered[col] - min_val) / (max_val - min_val)
-                else:
-                    normalized[f'{col}_norm'] = 0.0
-            else:
-                normalized[f'{col}_norm'] = 0.0
-
-        # Compute composite score (mean of normalized metrics, excluding NaNs)
-        norm_cols = [f'{col}_norm' for col in metric_cols]
-        normalized['composite_score'] = normalized[norm_cols].mean(axis=1, skipna=True)
-
-        # Aggregate by pipeline
-        scores = normalized.groupby('pipeline')['composite_score'].mean().sort_values()
-
-        return scores
-
 
 def main():
     validator = SubbandValidator()
 
     clean_results, noise_results, ref_eps = validator.run_full_validation()
 
-    print("COMPOSITE SCORES (Clean Signal)")
-
-    scores = validator.compute_composite_scores(clean_results)
-    print("\nRanking (Lower is Better):")
-    for pipeline, score in scores.items():
-        print(f"  {pipeline:<15}: {score:.4f}")
-
-    winner = scores.idxmin()
-    print(f"\n🏆 Winner: {winner}")
-
-    print("\n" + "="*60)
-    print("D3 SUBBAND RESULTS (12 Hz, Most Relevant for Pre-AF)")
-    print("="*60)
-
-    for pipeline, df in clean_results.items():
-        d3_row = df[df['band'] == 'D3'].iloc[0]
-        print(f"\n{pipeline}:")
-
-        print(f"  DET deviation:      {d3_row['det_deviation']:.4f}")
-        print(f"  ENTR deviation:     {d3_row['entr_deviation']:.4f}")
-        print(f"  LAM deviation:      {d3_row['lam_deviation']:.4f}")
-        print(f"  TT deviation:       {d3_row['tt_deviation'].mean():.4f}")
-        print(f"  Longest vertical deviation:       {d3_row['longest_vertical_deviation'].mean():.4f}")
-        print(f"  Mean Longest diagonal deviation:   {d3_row['longest_diagonal_deviation'].mean():.4f}")
-        print(f"  Period error (rel): {d3_row['period_error_relative']:.3f} ({d3_row['period_error_relative']*100:.1f}%)")
-
-    print("DETAILED RESULTS (All Subbands)")
-
-    for pipeline, df in clean_results.items():
-        print(f"\n{pipeline}:")
-        print(df[['band', 'det_deviation', 'entr_deviation', 'lam_deviation', 'tt_deviation', 'longest_vertical_deviation', 'longest_diagonal_deviation', 'period_error_relative']].to_string(index=False))
-
-    print("NOISE ROBUSTNESS SUMMARY")
-    for snr_db in [20, 10, 5, 1]:
-        print(f"\nSNR = {snr_db} dB:")
-        for pipeline in validator.PIPELINES:
-            mean_df = noise_results[f"{pipeline}_snr{snr_db}_mean"]
-            std_df = noise_results[f"{pipeline}_snr{snr_db}_std"]
-
-            print(f"\n  {pipeline}:")
-            print(f"    DET deviation: {mean_df['det_deviation'].mean():.4f} ± {std_df['det_deviation'].mean():.4f}")
-            print(f"    ENTR deviation: {mean_df['entr_deviation'].mean():.4f} ± {std_df['entr_deviation'].mean():.4f}")
-            print(f"    LAM deviation: {mean_df['lam_deviation'].mean():.4f} ± {std_df['lam_deviation'].mean():.4f}")
-            print(f"    TT deviation: {mean_df['tt_deviation'].mean():.4f}")
-            print(f"    Longest vertical deviation: {mean_df['longest_vertical_deviation'].mean():.4f}")
-            print(f"    Mean Longest diagonal deviation: {mean_df['longest_diagonal_deviation'].mean():.4f}")
-            print(f"    Period error (relative): {mean_df['period_error_relative'].mean():.3f} ± {std_df['period_error_relative'].mean():.3f}")
-
     results_file = os.path.join(validator.OUTPUT_DIR, 'subband_validation_results.csv')
     all_results = pd.concat(clean_results.values(), ignore_index=True)
     all_results.to_csv(results_file, index=False)
-    print(f"\nResults saved to: {results_file}")
+    print("done")
 
-
-def run_statistical_comparison(n_trials=100):
+def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
     from scipy.stats import ttest_ind
 
     validator = SubbandValidator()
 
+    # Generate or load reference RQA values and data
+    reference_rqa = None
+    reference_data = None
+
+    if use_reference_rqa:
+        ref_path = os.path.join(validator.OUTPUT_DIR, 'reference_rqa_values.json')
+        ref_data_path = os.path.join(validator.OUTPUT_DIR, 'reference_rqa_values_data.npz')
+
+        if os.path.exists(ref_path):
+            print("Loading existing reference RQA values...")
+            reference_rqa = validator.load_reference_rqa_values(ref_path)
+            if os.path.exists(ref_data_path):
+                reference_data = validator.load_reference_data(ref_data_path)
+        else:
+            print("Generating reference RQA values from pure sinusoids...")
+            reference_rqa = validator.generate_reference_rqa_values(ref_path)
+            reference_data = validator.load_reference_data(ref_data_path)
+        print()
+
     results = {
-        'swt_recon': {'DET': [], 'LAM': [], 'ENTR': [], "TT" : [], "L_longest_diagonal": [], "L_longest_vertical": []},
-        'swt_direct':  {'DET': [], 'LAM': [], 'ENTR': [], "TT" : [], "L_longest_diagonal": [], "L_longest_vertical": []},
-        'dwt_recon':  {'DET': [], 'LAM': [], 'ENTR': [], "TT" : [], "L_longest_diagonal": [], "L_longest_vertical": []},
+        'swt_recon': {'DET': [], 'LAM': [], 'ENTR': [], "TT": []},
+        'swt_direct':  {'DET': [], 'LAM': [], 'ENTR': [], "TT": []},
+        'dwt_recon':  {'DET': [], 'LAM': [], 'ENTR': [], "TT": []},
+        'dwt_direct':  {'DET': [], 'LAM': [], 'ENTR': [], "TT": []},
     }
 
-    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon']
+    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
 
-    # Run trials
     for trial in range(n_trials):
         if (trial + 1) % 10 == 0:
             print(f"  Trial {trial + 1}/{n_trials}...")
 
-        # Generate composite sine with random phase
         signal = validator.generate_composite_sine(random_phase=True)
 
-        # Decompose and compute RQA for each pipeline
         for pipeline in pipelines:
-            df, _ = validator.validate_pipeline(signal, pipeline)
+            df, _ = validator.validate_pipeline(signal, pipeline, reference_rqa=reference_rqa, reference_data=reference_data)
 
-            # Average metrics across all subbands
             avg_det = df['det_deviation'].mean()
             avg_lam = df['lam_deviation'].mean()
             avg_entr = df['entr_deviation'].mean()
             avg_tt = df['tt_deviation'].mean()
-            avg_l_vert_max = df['longest_vertical_deviation'].mean()
-            avg_l_diag_max = df['longest_diagonal_deviation'].mean()
+            # avg_hamming = df['hamming_distance'].mean()
+            # avg_crp_det = df['crp_det_deviation'].mean()
 
             results[pipeline]['DET'].append(avg_det)
             results[pipeline]['LAM'].append(avg_lam)
             results[pipeline]['ENTR'].append(avg_entr)
-            # results[pipeline]['TT'].append(avg_tt)
-            # results[pipeline]['L_longest_diagonal'].append(avg_l_diag_max)
-            # results[pipeline]['L_longest_vertical'].append(avg_l_vert_max)
+            results[pipeline]['TT'].append(avg_tt)
+            # results[pipeline]['HAMMING'].append(avg_hamming)
+            # results[pipeline]['CRP_DET'].append(avg_crp_det)
 
-    # Convert to numpy arrays
     for pipeline in pipelines:
-        for metric in ['DET', 'LAM', 'ENTR']:
+        for metric in ['DET', 'LAM', 'ENTR', 'TT']:
             results[pipeline][metric] = np.array(results[pipeline][metric])
-
-    # Perform Welch's t-tests
-    print("\n" + "="*60)
-    print("WELCH'S T-TEST RESULTS")
-    print("="*60)
 
     comparisons = [
         ('swt_recon', 'swt_direct', 'SWT Recon vs SWT Direct'),
         ('swt_recon', 'dwt_recon', 'SWT Recon vs DWT Recon'),
-        ('swt_direct', 'dwt_recon', 'SWT Direct vs DWT Recon')
+        ('swt_direct', 'dwt_recon', 'SWT Direct vs DWT Recon'),
+        ('dwt_direct', 'dwt_recon', 'DWT Direct vs DWT Recon'),
+        ('dwt_direct', 'swt_recon', 'DWT Direct vs SWT Recon'),
+        ('dwt_direct', 'swt_direct', 'DWT Direct vs SWT Direct'),
+
     ]
 
     stats_results = []
 
     for pipe1, pipe2, label in comparisons:
-        print(f"\n{label}:")
-        print("-" * 60)
-
-        for metric in ['DET', 'LAM', 'ENTR']:
+        for metric in ['DET', 'LAM', 'ENTR', 'TT']:
             data1 = results[pipe1][metric]
             data2 = results[pipe2][metric]
 
-            # Check if data has variance
             if data1.std() < 1e-10 and data2.std() < 1e-10:
-                # Both groups have no variance - skip test
-                print(f"  {metric}: No variance in either group - test skipped")
                 continue
 
-            # Welch's t-test (unequal variances)
             t_stat, p_value = ttest_ind(data1, data2, equal_var=False)
 
-            # Effect size (Cohen's d)
             pooled_std = np.sqrt((data1.std()**2 + data2.std()**2) / 2)
             if pooled_std < 1e-10:
                 cohens_d = 0.0
             else:
                 cohens_d = (data1.mean() - data2.mean()) / pooled_std
 
-            # Determine significance
             if p_value < 0.001:
                 sig = '***'
             elif p_value < 0.01:
@@ -620,20 +500,12 @@ def run_statistical_comparison(n_trials=100):
                 'significance': sig
             })
 
-    # Save results
     stats_df = pd.DataFrame(stats_results)
     stats_file = os.path.join(validator.OUTPUT_DIR, 'welch_ttest_results.csv')
     stats_df.to_csv(stats_file, index=False)
-
-    print("\n" + "="*60)
-    print(f"Statistical results saved to: {stats_file}")
-    print("="*60)
-
-    # Visualize distributions
-    print("\nGenerating visualizations...")
-    visualize_statistical_distributions(results, validator.OUTPUT_DIR)
+    # visualize_statistical_distributions(results, validator.OUTPUT_DIR)
     visualize_bar_comparison(results, validator.OUTPUT_DIR)
-    visualize_snr_degradation(validator, validator.OUTPUT_DIR, n_realizations=30)
+    visualize_snr_degradation(validator, validator.OUTPUT_DIR, n_realizations=30, use_reference_rqa=use_reference_rqa)
 
     return results, stats_df
 
@@ -642,22 +514,32 @@ def visualize_bar_comparison(results, output_dir):
     """Create bar charts comparing pipelines across metrics with error bars."""
     import matplotlib.pyplot as plt
 
-    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon']
-    metrics = ['DET', 'LAM', 'ENTR']
+    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
+    metrics = ['DET', 'LAM', 'ENTR', 'TT']
 
     colors = {
         'swt_recon': '#2ecc71',
         'swt_direct': '#3498db',
-        'dwt_recon': '#e74c3c'
+        'dwt_recon': '#e74c3c',
+        'dwt_direct': '#34495e',
     }
 
     labels = {
         'swt_recon': 'SWT Recon',
         'swt_direct': 'SWT Direct',
-        'dwt_recon': 'DWT Recon'
+        'dwt_recon': 'DWT Recon',
+        'dwt_direct': 'DWT Direct'
     }
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    metrics_mapping = {
+        'DET': 'Determinism',
+        'ENTR': 'Entropy',
+        'TT': 'Trapping Time',
+        'LAM': 'Laminarity'
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10))
+    axes = axes.flatten()
 
     for idx, metric in enumerate(metrics):
         ax = axes[idx]
@@ -673,7 +555,7 @@ def visualize_bar_comparison(results, output_dir):
         ax.set_xticks(x_pos)
         ax.set_xticklabels([labels[p] for p in pipelines], fontsize=11)
         ax.set_ylabel(f'{metric} Deviation', fontsize=12, fontweight='bold')
-        ax.set_title(f'{metric} Comparison', fontsize=14, fontweight='bold')
+        ax.set_title(f'{metrics_mapping[metric]} Deviation Comparison', fontsize=14, fontweight='bold')
         ax.grid(axis='y', alpha=0.3)
 
         # Add value labels on bars
@@ -692,21 +574,24 @@ def visualize_statistical_distributions(results, output_dir):
     """Create histogram distributions for each metric."""
     import matplotlib.pyplot as plt
 
-    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon']
-    metrics = ['DET', 'LAM', 'ENTR']
+    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
+    metrics = ['DET', 'LAM', 'ENTR', 'TT']
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    axes = axes.flatten()
 
     colors = {
         'swt_recon': '#2ecc71',
         'swt_direct': '#3498db',
-        'dwt_recon': '#e74c3c'
+        'dwt_recon': '#e74c3c',
+        'dwt_direct': '#34495e',
     }
 
     labels = {
         'swt_recon': 'SWT Recon',
         'swt_direct': 'SWT Direct',
-        'dwt_recon': 'DWT Recon'
+        'dwt_recon': 'DWT Recon',
+        'dwt_direct': 'DWT Direct'
     }
 
     for idx, metric in enumerate(metrics):
@@ -730,22 +615,24 @@ def visualize_statistical_distributions(results, output_dir):
     plt.show()
 
 
-def visualize_snr_degradation(validator, output_dir, n_realizations=50):
-    """Create SNR degradation curves for each pipeline."""
+def visualize_snr_degradation(validator, output_dir, n_realizations=50, use_reference_rqa=True):
     import matplotlib.pyplot as plt
 
-    print("\nGenerating SNR degradation curves...")
+    # Load reference RQA values
+    reference_rqa = None
+    if use_reference_rqa:
+        ref_path = os.path.join(validator.OUTPUT_DIR, 'reference_rqa_values.json')
+        if os.path.exists(ref_path):
+            reference_rqa = validator.load_reference_rqa_values(ref_path)
 
     signal_clean = validator.generate_composite_sine()
-    snr_levels = [30, 20, 15, 10, 5, 1, 0]
-    metrics = ['det_deviation', 'lam_deviation', 'entr_deviation']
+    snr_levels = [20, 15, 10, 5, 1, 0]
+    metrics = ['det_deviation', 'lam_deviation', 'entr_deviation', 'tt_deviation']
 
-    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon']
+    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
 
-    # Store results
     snr_results = {p: {m: {'mean': [], 'std': []} for m in metrics} for p in pipelines}
 
-    # Compute reference epsilons from clean signal
     ref_epsilons = {}
     for pipeline in pipelines:
         subbands_clean = validator.decompose_signal(signal_clean, pipeline)
@@ -762,32 +649,30 @@ def visualize_snr_degradation(validator, output_dir, n_realizations=50):
             ref_epsilons[pipeline][band] = RecurrencePlotGenerator.find_epsilon_for_target_rr(
                 subband_signal, tau, m, target_rr=0.1)
 
-    # Test each SNR level
     for snr_db in snr_levels:
-        print(f"  Testing SNR = {snr_db} dB...")
-
         for pipeline in pipelines:
             mean_df, std_df = validator.validate_with_noise(
-                signal_clean, pipeline, ref_epsilons[pipeline], snr_db, n_realizations)
+                signal_clean, pipeline, ref_epsilons[pipeline], snr_db, n_realizations, reference_rqa)
 
             for metric in metrics:
                 snr_results[pipeline][metric]['mean'].append(mean_df[metric].mean())
                 snr_results[pipeline][metric]['std'].append(std_df[metric].mean())
 
-    # Plot
     colors = {
         'swt_recon': '#2ecc71',
         'swt_direct': '#3498db',
-        'dwt_recon': '#e74c3c'
+        'dwt_recon': '#e74c3c',
+        'dwt_direct': '#34495e',
     }
 
     labels = {
         'swt_recon': 'SWT Recon',
         'swt_direct': 'SWT Direct',
-        'dwt_recon': 'DWT Recon'
+        'dwt_recon': 'DWT Recon',
+        'dwt_direct': 'DWT Direct'
     }
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 4, figsize=(18, 5))
 
     for idx, metric in enumerate(metrics):
         ax = axes[idx]
@@ -796,10 +681,9 @@ def visualize_snr_degradation(validator, output_dir, n_realizations=50):
             means = np.array(snr_results[pipeline][metric]['mean'])
             stds = np.array(snr_results[pipeline][metric]['std'])
 
-            ax.plot(snr_levels, means, marker='o', linewidth=2, markersize=8,
-                   color=colors[pipeline], label=labels[pipeline])
-            ax.fill_between(snr_levels, means - stds, means + stds,
-                           color=colors[pipeline], alpha=0.2)
+            ax.plot(snr_levels, means, marker='o', linewidth=2, markersize=8,color=colors[pipeline], label=labels[pipeline])
+
+            ax.fill_between(snr_levels, means - stds, means + stds,color=colors[pipeline], alpha=0.2)
 
         ax.set_xlabel('SNR (dB)', fontsize=12, fontweight='bold')
         ax.set_ylabel(f'{metric.replace("_", " ").title()}', fontsize=12, fontweight='bold')
@@ -816,6 +700,6 @@ def visualize_snr_degradation(validator, output_dir, n_realizations=50):
 
 
 if __name__ == '__main__':
-    n_trials = 200
-    # run_statistical_comparison(n_trials=n_trials)
-    main()
+    n_trials = 100
+    run_statistical_comparison(n_trials=n_trials)
+    # main()
