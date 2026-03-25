@@ -38,9 +38,11 @@ class DecompositionVisualizer:
         """Generate composite sine signal with one component per subband."""
         t = np.arange(self.N) / self.FS
         signal = np.zeros(self.N)
-
+        #
         for band, freq in self.SUBBAND_FREQS.items():
             signal += np.sin(2 * np.pi * freq * t)
+        #
+        # signal += np.sin(2 * np.pi * 48 * t)
 
         return signal
 
@@ -154,6 +156,7 @@ class DecompositionVisualizer:
         if signal_norm.std() > 0:
             signal_norm = (signal_norm - signal_norm.mean()) / signal_norm.std()
         ref_epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal_norm, tau, m, target_rr=0.1)
+        print(ref_epsilon)
 
         # Create visualization
         for snr in snr_levels:
@@ -161,7 +164,7 @@ class DecompositionVisualizer:
             gs = GridSpec(1, 2, figure=fig, hspace=0.3, wspace=0.3, width_ratios=[1, 1.2])
 
             snr_label = 'Clean' if np.isinf(snr) else f'SNR {snr}dB'
-            fig.suptitle(f'Single-Scale (No Decomposition): {snr_label}',
+            fig.suptitle(f'Single-Scale: {snr_label}',
                         fontsize=16, fontweight='bold', y=0.98)
 
             # Add noise
@@ -211,12 +214,12 @@ class DecompositionVisualizer:
 
     def visualize_decomposition_with_rps(self, pipeline_name, snr_levels=[np.inf, 20, 10, 5]):
         """
-        Generates a separate figure for each noise level,
-        showing decomposition (left) and RPs (right) side-by-side.
+        Generates figures with large, square RPs including X/Y axes,
+        matching the PAFVisualizer plotting style.
         """
         signal_clean = self.generate_composite_sine()
 
-        # 1. Pre-calculate reference epsilons from clean signal
+        # 1. Pre-calculate reference epsilons
         subbands_clean = self.decompose_signal(signal_clean, pipeline_name)
         ref_epsilons = {}
         for band in self.BAND_NAMES:
@@ -225,50 +228,51 @@ class DecompositionVisualizer:
             subband_signal = subbands_clean[band]
             if subband_signal.std() > 0:
                 subband_signal = (subband_signal - subband_signal.mean()) / subband_signal.std()
-            ref_epsilons[band] = RecurrencePlotGenerator.find_epsilon_for_target_rr(subband_signal, tau, m, target_rr=0.1)
+            ref_epsilons[band] = RecurrencePlotGenerator.find_epsilon_for_target_rr(subband_signal, tau, m,
+                                                                                    target_rr=0.1)
 
-        # 2. Iterate through each SNR level and create a UNIQUE plot
+        name_mapping = {
+            "swt_recon": "SWT Time Domain Reconstruction",
+            "dwt_recon": "DWT Time Domain Reconstruction",
+            "dwt_direct": "DWT Wavelet Coefficients",
+            "swt_direct": "SWT Wavelet Coefficients",
+        }
+
         for snr in snr_levels:
             n_bands = len(self.BAND_NAMES)
-            # Create a figure specifically for this SNR level - wider for bigger RPs
-            fig = plt.figure(figsize=(20, 4 * n_bands))
-            gs = GridSpec(n_bands, 2, figure=fig, hspace=0.4, wspace=0.2, width_ratios=[1, 1.2])
+
+            # --- Layout Tuning ---
+            # We use a wider figure and specific width_ratios to give the RP square space
+            fig = plt.figure(figsize=(16, 4 * n_bands))
+            gs = GridSpec(n_bands, 2, figure=fig, hspace=0.3, wspace=0.2, width_ratios=[1, 1])
 
             snr_label = 'Clean' if np.isinf(snr) else f'SNR {snr}dB'
-            fig.suptitle(f'Decomposition & RPs: {pipeline_name.upper()} ({snr_label})',
-                         fontsize=16, fontweight='bold', y=0.95)
+            fig.suptitle(f'{name_mapping[pipeline_name]} | Noise: {snr_label}',
+                         fontsize=18, fontweight='bold', y=0.94)
 
-            # Add noise for this specific level
             signal_noisy = self.add_awgn(signal_clean, snr)
             subbands = self.decompose_signal(signal_noisy, pipeline_name)
 
             for band_idx, band in enumerate(self.BAND_NAMES):
+                # --- Left: Decomposition Signal ---
                 ax_decomp = fig.add_subplot(gs[band_idx, 0])
                 subband_signal = subbands[band]
                 t_sub = np.arange(len(subband_signal)) / self.FS
 
                 ax_decomp.plot(t_sub, subband_signal, linewidth=0.8, color='#1f77b4')
-                ax_decomp.set_title(f'{band} ({self.SUBBAND_FREQS[band]} Hz)', fontsize=10, fontweight='bold')
-
-                if pipeline_name == 'swt_direct' or pipeline_name == 'dwt_direct':
-                    x_label = "Wavelet Coefficients"
-                    y_label = "Amplitude"
-                else :
-                    x_label = "Time (s)"
-                    y_label = "Amplitude"
-
-                ax_decomp.set_xlabel(x_label, fontsize=9)
-                ax_decomp.set_ylabel(y_label, fontsize=9)
+                ax_decomp.set_title(f'Subband {band} ({self.SUBBAND_FREQS[band]} Hz)', fontsize=12, fontweight='bold')
+                ax_decomp.set_ylabel('Amplitude', fontsize=10)
                 ax_decomp.grid(alpha=0.3)
-                ax_decomp.tick_params(labelsize=8)
 
-                # --- Right column: Recurrence Plot ---
+                if band_idx == n_bands - 1:
+                    ax_decomp.set_xlabel("Time (s)" if "recon" in pipeline_name else "Samples", fontsize=10)
+
+                # --- Right: Recurrence Plot (Matching PAFVisualizer style) ---
                 ax_rp = fig.add_subplot(gs[band_idx, 1])
                 freq = self.SUBBAND_FREQS[band]
                 tau, m = self.get_analytic_embedding_params(freq)
                 epsilon = ref_epsilons[band]
 
-                # Normalize for RP
                 subband_rp = subband_signal.copy()
                 if subband_rp.std() > 0:
                     subband_rp = (subband_rp - subband_rp.mean()) / subband_rp.std()
@@ -276,26 +280,27 @@ class DecompositionVisualizer:
                 rp_matrix, rqa_result = self.compute_rp(subband_rp, tau, m, epsilon)
 
                 if rp_matrix is not None:
-                    ax_rp.imshow(rp_matrix, cmap='binary', origin='upper', aspect='equal')
-                    if rqa_result is not None:
-                        ax_rp.set_title(f'RP: τ={tau}, m={m}, DET={rqa_result.determinism:.3f}', fontsize=10)
-                    else:
-                        ax_rp.set_title(f'RP: τ={tau}, m={m}', fontsize=10)
-                    ax_rp.set_xlabel('Time i', fontsize=9)
-                    ax_rp.set_ylabel('Time j', fontsize=9)
+                    # Using origin='lower' and aspect='equal' as requested
+                    im = ax_rp.imshow(rp_matrix, cmap='binary', origin='upper', aspect='equal', interpolation='nearest')
+
+                    det_str = f" | DET={rqa_result.determinism:.3f}" if rqa_result else ""
+                    ax_rp.set_title(f"RP (τ={tau}, m={m}){det_str}", fontsize=12)
+
+                    # Restore Axis Labels
+                    ax_rp.set_xlabel("Time index $i$", fontsize=10)
+                    ax_rp.set_ylabel("Time index $j$", fontsize=10)
+                    ax_rp.tick_params(labelsize=9)
                 else:
-                    ax_rp.text(0.5, 0.5, 'RP Failed', ha='center', va='center')
-                    ax_rp.set_title(f'RP: τ={tau}, m={m}', fontsize=9)
+                    ax_rp.text(0.5, 0.5, 'RP Computation Failed', ha='center', va='center')
 
-                ax_rp.set_xticks([])
-                ax_rp.set_yticks([])
+            # Tighten the overall figure margins
+            plt.subplots_adjust(left=0.08, right=0.92, top=0.90, bottom=0.08)
 
-            # Save each SNR level as a separate file
             clean_snr_str = "clean" if np.isinf(snr) else f"snr_{int(snr)}"
             filename = f'decomp_rp_{pipeline_name}_{clean_snr_str}.png'
             plt.savefig(os.path.join(self.OUTPUT_DIR, filename), dpi=200, bbox_inches='tight')
             print(f"Saved: {filename}")
-            plt.show()  # Display one by one
+            plt.show()
 
 
 def main():
