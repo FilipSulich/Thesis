@@ -164,6 +164,37 @@ class RecurrencePlotGenerator:
         return epsilon
 
     @staticmethod
+    def estimate_epsilon_max_distance(signal, tau, m, percentage=5.0):
+        """
+        Estimate epsilon as a percentage of maximum distance in phase space.
+
+        Args:
+            signal: Input signal
+            tau: Embedding delay
+            m: Embedding dimension
+            percentage: Percentage of max distance to use (default 5.0%)
+
+        Returns:
+            epsilon: Threshold value
+        """
+        from scipy.spatial.distance import pdist, squareform
+
+        # Embed signal
+        n = len(signal) - (m - 1) * tau
+        if n < 10:
+            return 0.1
+
+        embedded = np.array([signal[i:i + m * tau:tau] for i in range(n)])
+        distances = squareform(pdist(embedded, metric='euclidean'))
+
+        # Get maximum distance in phase space
+        max_distance = np.max(distances)
+
+        # Return specified percentage of max distance
+        epsilon = (percentage / 100.0) * max_distance
+        return epsilon
+
+    @staticmethod
     def find_epsilon_for_target_rr(signal, tau, m, target_rr=0.1):
         """
         Find epsilon that achieves target recurrence rate using bisection.

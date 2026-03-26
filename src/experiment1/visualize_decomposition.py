@@ -20,7 +20,6 @@ class DecompositionVisualizer:
         self.LEVEL = 4  # Wavelet decomposition level
         self.WAVELET = 'db4'
 
-        # Subband center frequencies (Hz)
         self.SUBBAND_FREQS = {
             'A4': 2,   # 0-4 Hz
             'D4': 6,   # 4-8 Hz
@@ -35,19 +34,17 @@ class DecompositionVisualizer:
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
     def generate_composite_sine(self):
-        """Generate composite sine signal with one component per subband."""
         t = np.arange(self.N) / self.FS
         signal = np.zeros(self.N)
         #
         for band, freq in self.SUBBAND_FREQS.items():
             signal += np.sin(2 * np.pi * freq * t)
         #
-        # signal += np.sin(2 * np.pi * 48 * t)
+        # signal += np.sin(2 * np.pi * 2 * t)
 
         return signal
 
     def add_awgn(self, signal, snr_db):
-        """Add Additive White Gaussian Noise at specified SNR."""
         if snr_db is None or np.isinf(snr_db):
             return signal
 
@@ -57,15 +54,15 @@ class DecompositionVisualizer:
         return signal + noise
 
     def decompose_signal(self, signal, pipeline_name):
-        """Decompose signal using specified pipeline."""
         pipeline_obj = Pipeline(pipeline_name='all', level=self.LEVEL, wavelet=self.WAVELET)
         func = getattr(pipeline_obj, f"pipeline_{pipeline_name}")
         return func(signal)
 
     def get_analytic_embedding_params(self, freq):
-        """Get embedding parameters from known frequency using RecurrencePlotGenerator utilities."""
-        tau = RecurrencePlotGenerator.estimate_time_delay_analytic(freq, self.FS)
-        m = RecurrencePlotGenerator.estimate_embedding_dim_analytic()
+        # tau = RecurrencePlotGenerator.estimate_time_delay_analytic(freq, self.FS)
+        # m = RecurrencePlotGenerator.estimate_embedding_dim_analytic()
+        tau = 2
+        m = 2
         return tau, m
 
     def compute_rp(self, signal, tau, m, epsilon):
@@ -89,12 +86,6 @@ class DecompositionVisualizer:
             return None, None
 
     def visualize_composite_with_noise(self, snr_levels=[np.inf, 20, 10, 5]):
-        """
-        Visualize composite sine signal at different noise levels.
-
-        Args:
-            snr_levels: List of SNR values in dB (use np.inf for clean signal)
-        """
         signal_clean = self.generate_composite_sine()
         t = np.arange(self.N) / self.FS
 
@@ -107,10 +98,8 @@ class DecompositionVisualizer:
         for idx, snr in enumerate(snr_levels):
             ax = axes[idx]
 
-            # Add noise
             signal_noisy = self.add_awgn(signal_clean, snr)
 
-            # Plot
             ax.plot(t, signal_noisy, 'k-', linewidth=0.8, alpha=0.8)
 
             if np.isinf(snr):
@@ -123,7 +112,6 @@ class DecompositionVisualizer:
             ax.set_ylabel('Amplitude')
             ax.grid(alpha=0.3)
 
-            # Add component frequencies annotation
             if idx == 0:
                 ax.text(0.02, 0.98, 'Components: 2, 6, 12, 24, 48 Hz',
                        transform=ax.transAxes, fontsize=10,
@@ -138,16 +126,8 @@ class DecompositionVisualizer:
         return fig
 
     def visualize_single_scale_rp(self, snr_levels=[np.inf, 20, 10, 5]):
-        """
-        Visualize single-scale RPs (no decomposition) at different noise levels.
-
-        Args:
-            snr_levels: List of SNR values in dB
-        """
         signal_clean = self.generate_composite_sine()
 
-        # Use fixed embedding parameters for composite signal
-        # Dominant frequency is around 12 Hz (middle of spectrum)
         tau = RecurrencePlotGenerator.estimate_time_delay_analytic(12, self.FS)
         m = RecurrencePlotGenerator.estimate_embedding_dim_analytic()
 
@@ -158,7 +138,6 @@ class DecompositionVisualizer:
         ref_epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal_norm, tau, m, target_rr=0.1)
         print(ref_epsilon)
 
-        # Create visualization
         for snr in snr_levels:
             fig = plt.figure(figsize=(16, 5))
             gs = GridSpec(1, 2, figure=fig, hspace=0.3, wspace=0.3, width_ratios=[1, 1.2])
@@ -213,10 +192,6 @@ class DecompositionVisualizer:
             plt.show()
 
     def visualize_decomposition_with_rps(self, pipeline_name, snr_levels=[np.inf, 20, 10, 5]):
-        """
-        Generates figures with large, square RPs including X/Y axes,
-        matching the PAFVisualizer plotting style.
-        """
         signal_clean = self.generate_composite_sine()
 
         # 1. Pre-calculate reference epsilons
