@@ -57,22 +57,6 @@ class RecurrencePlotGenerator:
     @staticmethod
     def plot_rp(rp_matrix, tau, m, epsilon=None, det=None, title_prefix="Recurrence Plot",
                 ax=None, show_labels=True):
-        """
-        Plot recurrence plot with proper formatting, labels, and title.
-
-        Args:
-            rp_matrix: Recurrence plot matrix (2D numpy array)
-            tau: Time delay used for embedding
-            m: Embedding dimension used
-            epsilon: Threshold value (optional, for title)
-            det: Determinism value (optional, for title)
-            title_prefix: Prefix for plot title
-            ax: Matplotlib axes object (if None, creates new figure)
-            show_labels: Whether to show axis labels
-
-        Returns:
-            fig, ax: Matplotlib figure and axes objects
-        """
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8, 8))
         else:

@@ -103,7 +103,7 @@ class DecompositionVisualizer:
             ax.plot(t, signal_noisy, 'k-', linewidth=0.8, alpha=0.8)
 
             if np.isinf(snr):
-                title = 'Composite Sine: Clean (No Noise)'
+                title = 'Composite Sine: Clean'
             else:
                 title = f'Composite Sine: SNR = {snr} dB'
 
@@ -222,8 +222,8 @@ class DecompositionVisualizer:
             gs = GridSpec(n_bands, 2, figure=fig, hspace=0.3, wspace=0.2, width_ratios=[1, 1])
 
             snr_label = 'Clean' if np.isinf(snr) else f'SNR {snr}dB'
-            fig.suptitle(f'{name_mapping[pipeline_name]} | Noise: {snr_label}',
-                         fontsize=18, fontweight='bold', y=0.94)
+            # fig.suptitle(f'{name_mapping[pipeline_name]} | Noise: {snr_label}',fontsize=18, fontweight='bold', y=0.94)
+            fig.suptitle(f'{name_mapping[pipeline_name]}',fontsize=18, fontweight='bold', y=0.94)
 
             signal_noisy = self.add_awgn(signal_clean, snr)
             subbands = self.decompose_signal(signal_noisy, pipeline_name)

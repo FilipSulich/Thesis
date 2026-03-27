@@ -69,9 +69,19 @@ class LorenzSolver:
             plt.show()
 
 
+    def plot_signal(self, signal):
+        fig, ax = plt.subplots()
+        plt.title('x axis')
+        plt.xlabel('time')
+        plt.ylabel('x')
+        ax.plot(signal[0:5000])
+        plt.show()
 if __name__ == "__main__":
     solver = LorenzSolver(10.0, 28.0, 8.0/3.0)
 
     signal = solver.generate_lorenz_signal()
+
+    solver.plot_signal(signal)
+
 
     solver.plot_lorenz_attractor()
