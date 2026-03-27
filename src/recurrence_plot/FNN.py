@@ -13,17 +13,14 @@ class FNN:
         self.fnn_percentages = None
 
     def embed(self, m):
-        """Create m-dimensional time-delay embedding."""
         n = len(self.signal) - (m - 1) * self.tau
         embedded = np.array([self.signal[i:i + m * self.tau:self.tau] for i in range(n)])
         return embedded
 
     def compute_fnn(self):
-        """Compute False Nearest Neighbors for dimensions 1 to max_dim."""
         fnn_percentages = []
 
         for m in range(1, self.max_dim + 1):
-            # Embed in dimension m
             embedded_m = self.embed(m)
             n_points = len(embedded_m)
 
@@ -31,7 +28,6 @@ class FNN:
                 fnn_percentages.append(0.0)
                 continue
 
-            # Embed in dimension m+1
             embedded_m1 = self.embed(m + 1)
             n_points_m1 = len(embedded_m1)
 

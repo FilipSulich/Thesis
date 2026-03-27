@@ -4,6 +4,10 @@ import numpy as np
 import pandas as pd
 import json
 
+from src.lorenz_solver.lorenz import LorenzSolver
+from src.recurrence_plot.AMI import AMI
+from src.recurrence_plot.FNN import FNN
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipelines.pipeline_wavelets import Pipeline
@@ -13,11 +17,13 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
 class SubbandValidator:
-    def __init__(self):
+    def __init__(self, is_sine, is_lorenz):
         self.FS = 128
         self.N = 512
         self.LEVEL = 4
         self.WAVELET = 'db4'
+        self.is_sine = is_sine
+        self.is_lorenz = is_lorenz
 
         self.SUBBAND_FREQS = {
             'A4': 2,   #D1 0-4 Hz
@@ -29,7 +35,12 @@ class SubbandValidator:
 
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
         self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
-        self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_synthetic'
+
+        if self.is_sine:
+            self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_sine'
+        elif self.is_lorenz :
+            self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_lorenz'
+
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
         self._cleanup_pyopencl_lock()
@@ -62,6 +73,23 @@ class SubbandValidator:
 
         return signal
 
+    def generate_lorenz_system(self, sigma, rho, beta, n_points):
+        lorenz = LorenzSolver(sigma, rho, beta)
+        signal = lorenz.generate_lorenz_signal(n_points, target_fs=self.FS)
+        return signal
+
+    def generate_ground_truth_values_lorenz(self):
+        pass
+
+    def get_optimal_params(self, signal):
+        ami = AMI(signal)
+        tau = ami.get_first_minimum()
+        fnn = FNN(signal=signal, tau=tau)
+        m = fnn.get_optimal_dimension()
+
+        return tau, m
+
+
     def generate_reference_rqa_values(self, save_path=None):
         if save_path is None:
             save_path = os.path.join(self.OUTPUT_DIR, 'reference_rqa_values.json')
@@ -77,20 +105,21 @@ class SubbandValidator:
             if pure_sine.std() > 0:
                 pure_sine = (pure_sine - pure_sine.mean()) / pure_sine.std()
 
-            tau, m = self.get_analytic_embedding_params(freq)
+            # tau, m = self.get_analytic_embedding_params(freq)
+            tau, m = self.get_optimal_params(pure_sine)
 
             # epsilon = RecurrencePlotGenerator.estimate_epsilon_max_distance(
             #     pure_sine, tau, m, percentage=5.0
             # )
             epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal=pure_sine, tau=tau, m=m, target_rr=0.1)
 
-            metrics = self.compute_rp_metrics(pure_sine, tau, m, epsilon)
+            metrics = self.compute_rp_metrics(pure_sine, tau, m, epsilon, compute_distance_matrix=True)
 
             reference_values[band] = {
                 'freq_hz': freq,
-                'tau': tau,
-                'm': m,
-                'epsilon': epsilon,
+                'tau': int(tau),
+                'm': int(m),
+                'epsilon': float(epsilon),
                 'DET': float(metrics['DET']),
                 'ENTR': float(metrics['ENTR']),
                 'LAM': float(metrics['LAM']),
@@ -102,6 +131,7 @@ class SubbandValidator:
 
             reference_data[band] = {
                 'rp_matrix': metrics['rp_matrix'],
+                'distance_matrix': metrics['distance_matrix'],
                 'pure_sine': pure_sine
             }
 
@@ -113,6 +143,7 @@ class SubbandValidator:
 
         ref_data_path = save_path.replace('.json', '_data.npz')
         rp_matrices = {}
+        distance_matrices = {}
         for band in self.BAND_NAMES:
             rp_obj = reference_data[band]['rp_matrix']
             if hasattr(rp_obj, 'recurrence_matrix_reverse_normalized'):
@@ -120,8 +151,13 @@ class SubbandValidator:
             else:
                 rp_matrices[f'{band}_rp'] = rp_obj
 
+            # Save distance matrix
+            dist_matrix = reference_data[band]['distance_matrix']
+            if dist_matrix is not None:
+                distance_matrices[f'{band}_dist'] = dist_matrix
+
         signals = {f'{band}_signal': reference_data[band]['pure_sine'] for band in self.BAND_NAMES}
-        np.savez(ref_data_path, **rp_matrices, **signals)
+        np.savez(ref_data_path, **rp_matrices, **distance_matrices, **signals)
 
         return reference_values
 
@@ -133,6 +169,7 @@ class SubbandValidator:
             raise FileNotFoundError(f"Reference values file not found: {load_path}")
 
         with open(load_path, 'r') as f:
+            print("Loading reference rqa values...")
             reference_values = json.load(f)
 
         return reference_values
@@ -150,17 +187,35 @@ class SubbandValidator:
         for band in self.BAND_NAMES:
             reference_data[band] = {
                 'rp_matrix': data[f'{band}_rp'],
-                'pure_sine': data[f'{band}_signal']
+                'pure_sine': data[f'{band}_signal'],
+                'distance_matrix': data[f'{band}_dist'] if f'{band}_dist' in data else None
             }
 
         return reference_data
 
-    def get_analytic_embedding_params(self, freq):
+    def get_analytic_embedding_params(self, freq, signal):
         # tau = RecurrencePlotGenerator.estimate_time_delay_analytic(freq, self.FS)
         # m = RecurrencePlotGenerator.estimate_embedding_dim_analytic()
-        tau = 2
-        m = 2
+        tau, m = self.get_optimal_params(signal)
+        # tau = 2
+        # m = 2
         return tau, m
+
+    def compute_frobenius_distance(self, dist_matrix_ref, dist_matrix_pipe):
+        """
+        Compute Frobenius norm (Euclidean distance) between two distance matrices.
+        """
+        if dist_matrix_ref is None or dist_matrix_pipe is None:
+            return np.nan
+
+        if dist_matrix_ref.shape != dist_matrix_pipe.shape:
+            min_size = min(dist_matrix_ref.shape[0], dist_matrix_pipe.shape[0])
+            dist_matrix_ref = dist_matrix_ref[:min_size, :min_size]
+            dist_matrix_pipe = dist_matrix_pipe[:min_size, :min_size]
+
+        # Frobenius norm: sqrt(sum of squared differences)
+        frobenius_dist = np.linalg.norm(dist_matrix_ref - dist_matrix_pipe, ord='fro')
+        return frobenius_dist
 
     def compute_hamming_distance(self, rp_gt, rp_pipe):
         if rp_gt.shape != rp_pipe.shape:
@@ -272,7 +327,7 @@ class SubbandValidator:
         func = getattr(pipeline_obj, f"pipeline_{pipeline_name}")
         return func(signal)
 
-    def compute_rp_metrics(self, signal, tau, m, epsilon):
+    def compute_rp_metrics(self, signal, tau, m, epsilon, compute_distance_matrix=False):
         try:
             os.environ['PYOPENCL_CTX'] = '0'
             rp_gen = RecurrencePlotGenerator(
@@ -303,6 +358,36 @@ class SubbandValidator:
             lam = rqa_result.laminarity
             if np.isnan(lam): lam = 0.0
 
+            distance_matrix = None
+            if compute_distance_matrix:
+                # Compute unthresholded distance matrix
+                rp_gen_unthresh = RecurrencePlotGenerator(
+                    signal=signal,
+                    time_delay=tau,
+                    embedding_dim=m,
+                    path=self.OUTPUT_DIR,
+                    epsilon=epsilon,
+                    unthresholded=True
+                )
+                from pyrqa.settings import Settings
+                from pyrqa.analysis_type import Cross
+                from pyrqa.neighbourhood import Unthresholded
+                from pyrqa.metric import EuclideanMetric
+                from pyrqa.computation import RPComputation
+                from pyrqa.time_series import TimeSeries
+
+                time_series = TimeSeries(signal, embedding_dimension=m, time_delay=tau)
+                settings_unthresh = Settings(
+                    time_series=time_series,
+                    analysis_type=Cross,
+                    neighbourhood=Unthresholded(),
+                    similarity_measure=EuclideanMetric,
+                    theiler_corrector=1
+                )
+                rp_comp_unthresh = RPComputation.create(settings_unthresh, verbose=False)
+                rp_result_unthresh = rp_comp_unthresh.run()
+                distance_matrix = rp_result_unthresh.recurrence_matrix_reverse_normalized
+
             return {
                 'DET': det,
                 'ENTR': rqa_result.entropy_diagonal_lines,
@@ -311,7 +396,8 @@ class SubbandValidator:
                 'L_longest_diagonal': longest_diagonal,
                 'L_longest_vertical': longest_vertical_line,
                 'TT': tt,
-                'rp_matrix': rp_matrix
+                'rp_matrix': rp_matrix,
+                'distance_matrix': distance_matrix
             }
         except Exception as e:
             return {
@@ -322,83 +408,128 @@ class SubbandValidator:
                 'L_longest_diagonal': 0.0,
                 'L_max_vertical': 0.0,
                 'TT': 0.0,
-                'rp_matrix': None
+                'rp_matrix': None,
+                'distance_matrix': None
             }
 
+    def get_unthresholded_matrix(self, signal, tau, m):
+        """Explicitly computes the UTRP for Frobenius comparison."""
+        from pyrqa.settings import Settings
+        from pyrqa.analysis_type import Cross
+        from pyrqa.neighbourhood import Unthresholded
+        from pyrqa.metric import EuclideanMetric
+        from pyrqa.computation import RPComputation
+        from pyrqa.time_series import TimeSeries
 
-    def validate_pipeline(self, signal, pipeline_name, reference_epsilons=None, reference_rqa=None, reference_data=None):
+        # Ensure signal is a TimeSeries object
+        ts = TimeSeries(signal, embedding_dimension=m, time_delay=tau)
+        settings = Settings(ts, analysis_type=Cross,
+                            neighbourhood=Unthresholded(),
+                            similarity_measure=EuclideanMetric,
+                            theiler_corrector=1)
 
+        computation = RPComputation.create(settings, verbose=False)
+        result = computation.run()
+        # This returns the distance matrix
+        return result.recurrence_matrix_reverse_normalized
+
+    def validate_pipeline(self, signal, pipeline_name, reference_rqa=None, reference_data=None):
+        from scipy.signal import resample
+
+        # 1. Decompose the signal into subbands
         subbands = self.decompose_signal(signal, pipeline_name)
-
         results = []
-        epsilons_used = {}
 
-
+        # 2. Iterate through each band (D1, D2, D3, D4, A4)
         for band in self.BAND_NAMES:
             freq = self.SUBBAND_FREQS[band]
-            tau, m = self.get_analytic_embedding_params(freq)
 
-            expected_period = self.FS / freq
-
-            if len(subbands) == 1:
+            # Extract the specific subband signal
+            if isinstance(subbands, (list, np.ndarray)) and len(subbands) == 1:
                 subband_signal = subbands[0]
             else:
-             subband_signal = subbands[band]
+                subband_signal = subbands[band]
 
+            # --- FIX: Handle Decimation Mismatch (DWT Direct) ---
+            # If the subband is shorter than the ground truth (e.g., 32 vs 512),
+            # we resample it back to the original length N to allow matrix comparison.
+            target_length = self.N
+            if len(subband_signal) != target_length:
+                # Fourier resampling preserves the spectral content of the subband
+                subband_signal = resample(subband_signal, target_length)
+
+            # 3. Standardize the signal
             if subband_signal.std() > 0:
                 subband_signal = (subband_signal - subband_signal.mean()) / subband_signal.std()
 
-            if reference_epsilons is not None and band in reference_epsilons:
-                epsilon = reference_epsilons[band]
+            # 4. Parameter Injection: Use Reference Values to ensure 1:1 comparison
+            if reference_rqa is not None and band in reference_rqa:
+                tau = reference_rqa[band]['tau']
+                m = reference_rqa[band]['m']
+                epsilon = reference_rqa[band]['epsilon']
             else:
-                # epsilon = RecurrencePlotGenerator.estimate_epsilon_max_distance(subband_signal, tau, m, percentage=5.0)
-                epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal=subband_signal, tau=tau, m=m, target_rr=0.1)
-                epsilons_used[band] = epsilon
+                # Fallback to AMI/FNN if no reference is provided
+                tau, m = self.get_optimal_params(subband_signal)
+                epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(
+                    signal=subband_signal, tau=tau, m=m, target_rr=0.1
+                )
 
-            metrics = self.compute_rp_metrics(subband_signal, tau, m, epsilon)
+            # 5. Compute Pipeline RP and Distance Matrix (UTRP)
+            compute_dist_matrix = reference_data is not None
+            metrics = self.compute_rp_metrics(
+                subband_signal, tau, m, epsilon,
+                compute_distance_matrix=compute_dist_matrix
+            )
 
+            # Initialize absolute metrics
             hamming_distance = np.nan
-            ibf = np.nan
             rp_pattern_corr = np.nan
+            frobenius_distance = np.nan
+            ibf = self.compute_inband_power_fraction(subband_signal, freq, fs=self.FS, band_name=band)
 
+            # 6. Perform Direct Matrix-Level Comparisons
             if reference_data is not None and band in reference_data:
                 ref_data = reference_data[band]
-                ref_rp_matrix = ref_data['rp_matrix']
-                ref_pure_sine = ref_data['pure_sine']
 
-                if ref_pure_sine.std() > 0:
-                    ref_pure_sine_norm = (ref_pure_sine - ref_pure_sine.mean()) / ref_pure_sine.std()
-                else:
-                    ref_pure_sine_norm = ref_pure_sine
-
-                if metrics['rp_matrix'] is not None and ref_rp_matrix is not None:
+                # Compare Binary Recurrence Plots (Hamming & Correlation)
+                if metrics['rp_matrix'] is not None and ref_data['rp_matrix'] is not None:
                     try:
-                        ref_matrix = ref_rp_matrix.recurrence_matrix_reverse_normalized if hasattr(ref_rp_matrix, 'recurrence_matrix_reverse_normalized') else ref_rp_matrix
-                        pipe_matrix = metrics['rp_matrix'].recurrence_matrix_reverse_normalized if hasattr(metrics['rp_matrix'], 'recurrence_matrix_reverse_normalized') else metrics['rp_matrix']
+                        # Extract raw matrices (handles potential wrapper objects)
+                        ref_matrix = ref_data['rp_matrix'].recurrence_matrix_reverse_normalized \
+                            if hasattr(ref_data['rp_matrix'], 'recurrence_matrix_reverse_normalized') \
+                            else ref_data['rp_matrix']
+
+                        pipe_matrix = metrics['rp_matrix'].recurrence_matrix_reverse_normalized \
+                            if hasattr(metrics['rp_matrix'], 'recurrence_matrix_reverse_normalized') \
+                            else metrics['rp_matrix']
+
                         hamming_distance = self.compute_hamming_distance(ref_matrix, pipe_matrix)
                         rp_pattern_corr = self.compute_rp_pattern_correlation(ref_matrix, pipe_matrix)
-                    except:
-                        hamming_distance = np.nan
-                        rp_pattern_corr = np.nan
+                    except Exception as e:
+                        print(f"Error in structural comparison for {band}: {e}")
 
-                ibf = self.compute_inband_power_fraction(subband_signal, freq, band_name=band, fs=self.FS)
+                # Compare Unthresholded Distance Matrices (Frobenius)
+                if ref_data.get('distance_matrix') is not None and metrics['distance_matrix'] is not None:
+                    frobenius_distance = self.compute_frobenius_distance(
+                        ref_data['distance_matrix'],
+                        metrics['distance_matrix']
+                    )
 
+            # 7. Compute RQA Deviations (Relative to Reference)
             if reference_rqa is not None and band in reference_rqa:
                 ref = reference_rqa[band]
                 det_deviation = abs(ref['DET'] - metrics['DET'])
-                entr_deviation = abs(ref['ENTR'] - metrics['ENTR'])
                 lam_deviation = abs(ref['LAM'] - metrics['LAM'])
                 tt_deviation = abs(ref['TT'] - metrics['TT'])
-                longest_diagonal_line_deviation = abs(ref['L_longest_diagonal'] - metrics['L_longest_diagonal']) / len(subband_signal)
-                longest_vertical_line_deviation = abs(ref['L_longest_vertical'] - metrics['L_longest_vertical']) / len(subband_signal)
+                # Normalized length deviations
+                long_diag_dev = abs(ref['L_longest_diagonal'] - metrics['L_longest_diagonal']) / target_length
+                long_vert_dev = abs(ref['L_longest_vertical'] - metrics['L_longest_vertical']) / target_length
             else:
-                det_deviation = abs(1.0 - metrics['DET'])
-                entr_deviation = metrics['ENTR']
-                lam_deviation = metrics['LAM']
-                tt_deviation = metrics['TT']
-                longest_diagonal_line_deviation = abs(1 -  metrics['L_longest_diagonal'] / len(subband_signal)) #should approx the length of the signal
-                longest_vertical_line_deviation = metrics['L_longest_vertical'] / len(subband_signal)#should be 0
+                # Default fallback values
+                det_deviation, lam_deviation, tt_deviation = 0.0, 0.0, 0.0
+                long_diag_dev, long_vert_dev = 0.0, 0.0
 
+            # 8. Store Results
             results.append({
                 'pipeline': pipeline_name,
                 'band': band,
@@ -406,40 +537,23 @@ class SubbandValidator:
                 'tau': tau,
                 'm': m,
                 'epsilon': epsilon,
-
                 'DET': metrics['DET'],
-                'ENTR': metrics['ENTR'],
                 'LAM': metrics['LAM'],
-
-                'L_mean_diagonal': metrics['L_mean_diagonal'],
-                'L_longest_diagonal': metrics['L_longest_diagonal'],
-                'L_longest_vertical': metrics['L_longest_diagonal'],
                 'TT': metrics['TT'],
-
                 'det_deviation': det_deviation,
-                # 'entr_deviation': entr_deviation,
                 'lam_deviation': lam_deviation,
-                'tt_deviation' : tt_deviation,
-                'longest_diagonal_deviation': longest_diagonal_line_deviation,
-                'longest_vertical_deviation': longest_vertical_line_deviation,
-
+                'tt_deviation': tt_deviation,
+                'longest_diagonal_deviation': long_diag_dev,
+                'longest_vertical_deviation': long_vert_dev,
                 'hamming_distance': hamming_distance,
-                # 'crp_det_deviation': crp_det_deviation,
-                # 'hausdorff_distance': hausdorff,
-                'ibf': ibf,
                 'rp_pattern_corr': rp_pattern_corr,
+                'frobenius_distance': frobenius_distance,
+                'ibf': ibf
             })
 
-        if reference_epsilons is None:
-            return pd.DataFrame(results), epsilons_used
-        else:
-            return pd.DataFrame(results), None
+        return pd.DataFrame(results), None
 
     def run_leakage_analysis(self, n_trials=20):
-        """
-        Performs a frequency sweep. For each target frequency, it measures
-        the energy distribution across all 5 output subbands.
-        """
         pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
         leakage_results = []
 
@@ -470,7 +584,6 @@ class SubbandValidator:
                         })
 
         return pd.DataFrame(leakage_results)
-
 
     def validate_with_noise(self, signal, pipeline_name, reference_epsilons, snr_db, n_realizations=50, reference_rqa=None, reference_data=None):
         all_results = []
@@ -543,7 +656,6 @@ class SubbandValidator:
 
         return clean_results, noise_results, reference_epsilons
 
-
 def plot_leakage_matrices(df, output_dir):
     import seaborn as sns
     import matplotlib.pyplot as plt
@@ -553,9 +665,7 @@ def plot_leakage_matrices(df, output_dir):
 
     for i, pipe in enumerate(pipelines):
         pipe_df = df[df['pipeline'] == pipe]
-        # Pivot to create Matrix: Index=Input Sine, Columns=Output Subband
         matrix = pipe_df.groupby(['input_sine', 'output_subband'])['energy_fraction'].mean().unstack()
-        # Ensure correct order
         order = ['D1', 'D2', 'D3', 'D4', 'A4']
         matrix = matrix.reindex(index=order, columns=order)
 
@@ -567,8 +677,9 @@ def plot_leakage_matrices(df, output_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'leakage_matrices.png'))
     plt.show()
+
 def main():
-    validator = SubbandValidator()
+    validator = SubbandValidator(is_sine=True, is_lorenz=False)
 
     clean_results, noise_results, ref_eps = validator.run_full_validation()
 
@@ -577,11 +688,9 @@ def main():
     all_results.to_csv(results_file, index=False)
     print("done")
 
-
 def visualize_absolute_metrics(master_df, output_dir):
     import matplotlib.pyplot as plt
 
-    # 1. Filter out dwt_direct for structural metrics
     struct_df = master_df[master_df['pipeline'] != 'dwt_direct']
 
     metrics = ['hamming_distance', 'rp_pattern_corr']
@@ -637,11 +746,10 @@ def visualize_absolute_metrics(master_df, output_dir):
     plt.savefig(os.path.join(output_dir, 'structural_metrics_filtered.png'))
     plt.show()
 
-
-def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
+def run_statistical_comparison(is_sine=False, is_lorenz=False, n_trials=100, use_reference_rqa=True):
     from scipy.stats import ttest_ind
 
-    validator = SubbandValidator()
+    validator = SubbandValidator(is_sine=is_sine, is_lorenz=is_lorenz)
 
     reference_rqa = None
     reference_data = None
@@ -651,19 +759,21 @@ def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
         ref_data_path = os.path.join(validator.OUTPUT_DIR, 'reference_rqa_values_data.npz')
 
         if os.path.exists(ref_path):
+            print("loading saved reference rqa values")
             reference_rqa = validator.load_reference_rqa_values(ref_path)
             if os.path.exists(ref_data_path):
                 reference_data = validator.load_reference_data(ref_data_path)
         else:
+            print("no reference rqa data found")
             reference_rqa = validator.generate_reference_rqa_values(ref_path)
             reference_data = validator.load_reference_data(ref_data_path)
         print()
 
     results = {
-        'swt_recon': {'DET': [], 'LAM': [], "TT": [], 'HAMMING': [], 'IBF': [], 'RP_CORR': []},
-        'swt_direct':  {'DET': [], 'LAM': [],"TT": [], 'HAMMING': [], 'IBF': [], 'RP_CORR': []},
-        'dwt_recon':  {'DET': [], 'LAM': [], "TT": [], 'HAMMING': [], 'IBF': [], 'RP_CORR': []},
-        'dwt_direct':  {'DET': [], 'LAM': [], "TT": [], 'HAMMING': [],  'IBF': [], 'RP_CORR': []},
+        'swt_recon': {'DET': [], 'LAM': [], "TT": [], 'HAMMING': [], 'IBF': [], 'RP_CORR': [], 'FROBENIUS': []},
+        'swt_direct':  {'DET': [], 'LAM': [],"TT": [], 'HAMMING': [], 'IBF': [], 'RP_CORR': [], 'FROBENIUS': []},
+        'dwt_recon':  {'DET': [], 'LAM': [], "TT": [], 'HAMMING': [], 'IBF': [], 'RP_CORR': [], 'FROBENIUS': []},
+        'dwt_direct':  {'DET': [], 'LAM': [], "TT": [], 'HAMMING': [],  'IBF': [], 'RP_CORR': [], 'FROBENIUS': []},
     }
 
     pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
@@ -680,11 +790,6 @@ def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
             df, _ = validator.validate_pipeline(signal, pipeline,reference_rqa=reference_rqa,reference_data=reference_data)
             all_trial_data.append(df)
 
-        master_df = pd.concat(all_trial_data, ignore_index=True)
-
-        if trial == n_trials - 1:
-            visualize_absolute_metrics(master_df, validator.OUTPUT_DIR)
-
 
         for pipeline in pipelines:
             df, _ = validator.validate_pipeline(signal, pipeline, reference_rqa=reference_rqa, reference_data=reference_data)
@@ -695,6 +800,7 @@ def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
             avg_hamming = df['hamming_distance'].mean()
             avg_ibf = df['ibf'].mean()
             avg_rp_corr = df['rp_pattern_corr'].mean()
+            avg_frobenius = df['frobenius_distance'].mean()
 
             results[pipeline]['DET'].append(avg_det)
             results[pipeline]['LAM'].append(avg_lam)
@@ -702,25 +808,26 @@ def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
             results[pipeline]['HAMMING'].append(avg_hamming)
             results[pipeline]['IBF'].append(avg_ibf)
             results[pipeline]['RP_CORR'].append(avg_rp_corr)
+            results[pipeline]['FROBENIUS'].append(avg_frobenius)
 
     for pipeline in pipelines:
-        for metric in ['DET', 'LAM', 'TT', 'HAMMING','IBF', 'RP_CORR']:
+        for metric in ['DET', 'LAM', 'TT', 'HAMMING','IBF', 'RP_CORR', 'FROBENIUS']:
             results[pipeline][metric] = np.array(results[pipeline][metric])
 
     comparisons = [
         ('swt_recon', 'swt_direct', 'SWT Recon vs SWT Direct'),
         ('swt_recon', 'dwt_recon', 'SWT Recon vs DWT Recon'),
         ('swt_direct', 'dwt_recon', 'SWT Direct vs DWT Recon'),
-        # ('dwt_direct', 'dwt_recon', 'DWT Direct vs DWT Recon'),
-        # ('dwt_direct', 'swt_recon', 'DWT Direct vs SWT Recon'),
-        # ('dwt_direct', 'swt_direct', 'DWT Direct vs SWT Direct'),
+        ('dwt_direct', 'dwt_recon', 'DWT Direct vs DWT Recon'),
+        ('dwt_direct', 'swt_recon', 'DWT Direct vs SWT Recon'),
+        ('dwt_direct', 'swt_direct', 'DWT Direct vs SWT Direct'),
 
     ]
 
     stats_results = []
 
     for pipe1, pipe2, label in comparisons:
-        for metric in ['DET', 'LAM', 'TT', 'HAMMING','IBF', 'RP_CORR']:
+        for metric in ['DET', 'LAM', 'TT', 'HAMMING','IBF', 'RP_CORR', 'FROBENIUS']:
             data1 = results[pipe1][metric]
             data2 = results[pipe2][metric]
 
@@ -768,70 +875,101 @@ def run_statistical_comparison(n_trials=100, use_reference_rqa=True):
     stats_df = pd.DataFrame(stats_results)
     stats_file = os.path.join(validator.OUTPUT_DIR, 'welch_ttest_results.csv')
     stats_df.to_csv(stats_file, index=False)
+
+    master_df = pd.concat(all_trial_data, ignore_index=True)
+    visualize_absolute_metrics(master_df, validator.OUTPUT_DIR)
+
     # visualize_statistical_distributions(results, validator.OUTPUT_DIR)
-    visualize_bar_comparison(results, validator.OUTPUT_DIR)
+    visualize_bar_comparison_pro(results, validator.OUTPUT_DIR, master_df, reference_rqa)
+
+    # Visualize Frobenius distances
+    visualize_frobenius_distances(master_df, validator.OUTPUT_DIR)
 
     return results, stats_df
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import numpy as np
 
-
-def visualize_bar_comparison(results, output_dir):
-    import matplotlib.pyplot as plt
+def visualize_bar_comparison_pro(results, output_dir, master_df, reference_rqa):
+    sns.set_theme(style="whitegrid", font_scale=1.1)
 
     pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
     metrics = ['DET', 'LAM', 'TT']
-    colors = {
-        'swt_recon': '#2ecc71',
-        'swt_direct': '#3498db',
-        'dwt_recon': '#e74c3c',
-        'dwt_direct': '#34495e',
-    }
 
-    labels = {
-        'swt_recon': 'SWT-R',
-        'swt_direct': 'SWT-D',
-        'dwt_recon': 'DWT-R',
-        'dwt_direct': 'DWT-D'
-    }
+    colors = ['#2ecc71', '#3498db', '#e74c3c', '#34495e']
+    labels = {'swt_recon': 'SWT-R', 'swt_direct': 'SWT-D', 'dwt_recon': 'DWT-R', 'dwt_direct': 'DWT-D'}
+    metrics_mapping = {'DET': 'Determinism', 'TT': 'Trapping Time', 'LAM': 'Laminarity'}
 
-    metrics_mapping = {
-        'DET': 'Determinism',
-        'ENTR': 'Entropy',
-        'TT': 'Trapping Time',
-        'LAM': 'Laminarity',
-        'HAMMING': 'Hamming Distance',
-        'CRP_DET': 'CRP-DET',
-        'HAUSDORFF': 'Hausdorff Distance',
-        'IBF': 'In-Band Power (%)',
-        'RP_CORR': 'RP Pattern Correlation'
-    }
-
-    fig, axes = plt.subplots(1, 3, figsize=(22, 16))
-    axes = axes.flatten()
+    fig1, axes1 = plt.subplots(1, 3, figsize=(20, 7))
 
     for idx, metric in enumerate(metrics):
-        ax = axes[idx]
+        ax = axes1[idx]
+        deviation_data = [results[p][metric] for p in pipelines]
 
-        means = [results[p][metric].mean() for p in pipelines]
-        stds = [results[p][metric].std() for p in pipelines]
+        parts = ax.violinplot(deviation_data, positions=range(len(pipelines)),showmeans=True, showmedians=True, widths=0.6)
 
-        x_pos = np.arange(len(pipelines))
-        bars = ax.bar(x_pos, means, yerr=stds, capsize=5,color=[colors[p] for p in pipelines],edgecolor='black', linewidth=1.5, alpha=0.8)
+        for i, pc in enumerate(parts['bodies']):
+            pc.set_facecolor(colors[i])
+            pc.set_alpha(0.6)
+            pc.set_edgecolor('black')
+            pc.set_linewidth(1.2)
 
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels([labels[p] for p in pipelines], fontsize=11)
-        ax.set_ylabel(f'{metric} Deviation', fontsize=12, fontweight='bold')
-        ax.set_title(f'{metrics_mapping[metric]} Deviation Comparison', fontsize=14, fontweight='bold')
-        ax.grid(axis='y', alpha=0.3)
+        parts['cmedians'].set_edgecolor('#2c3e50')
+        parts['cmedians'].set_linewidth(2)
 
-        for i, (mean, std) in enumerate(zip(means, stds)):
-            ax.text(i, mean + std + 0.005, f'{mean:.4f}±{std:.4f}',
-                   ha='center', va='bottom', fontsize=9)
+        ax.set_xticks(range(len(pipelines)))
+        ax.set_xticklabels([labels[p] for p in pipelines])
+        ax.set_title(f'{metrics_mapping[metric]} Deviation', fontweight='bold', pad=15)
+        ax.set_ylabel('Relative Deviation')
+
+        sns.despine(ax=ax)
+        ax.grid(axis='x')
 
     plt.tight_layout()
-    filename = os.path.join(output_dir, 'bar_comparison.png')
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    print(f"Saved bar comparison: {filename}")
-    plt.show()
+    plt.savefig(os.path.join(output_dir, 'pro_violin_deviations.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig1)
+
+    fig2, axes2 = plt.subplots(1, 3, figsize=(20, 7))
+
+    for idx, metric in enumerate(metrics):
+        ax = axes2[idx]
+
+        # Extract data for plotting
+        plot_data = [master_df[master_df['pipeline'] == p][metric].values for p in pipelines]
+
+        # Create sleek boxplot
+        bplot = ax.boxplot(plot_data, positions=range(len(pipelines)),
+                           patch_artist=True, widths=0.5,
+                           medianprops=dict(color="black", linewidth=1.5),
+                           flierprops=dict(marker='d', markerfacecolor='gray', markersize=4, alpha=0.5))
+
+        for i, box in enumerate(bplot['boxes']):
+            box.set_facecolor(colors[i])
+            box.set_alpha(0.6)
+            box.set_edgecolor('black')
+
+        # Ground Truth Reference Line
+        if reference_rqa is not None:
+            avg_ref = np.mean([reference_rqa[band][metric] for band in reference_rqa.keys()])
+            ax.axhline(y=avg_ref, color='#e67e22', linestyle='--', linewidth=1.5,
+                       label='Reference Ground Truth', alpha=0.9)
+            if idx == 2:  # Only show legend on the last subplot to avoid clutter
+                ax.legend(frameon=False, loc='upper right', fontsize=10)
+
+        ax.set_xticks(range(len(pipelines)))
+        ax.set_xticklabels([labels[p] for p in pipelines])
+        ax.set_title(f'Absolute {metrics_mapping[metric]}', fontweight='bold', pad=15)
+        ax.set_ylabel('Metric Value')
+
+        sns.despine(ax=ax)
+        ax.grid(axis='x')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'pro_boxplot_absolute.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig2)
+
+    print("Professional plots saved successfully.")
 
 def visualize_statistical_distributions(results, output_dir):
     """Create histogram distributions for each metric."""
@@ -862,8 +1000,7 @@ def visualize_statistical_distributions(results, output_dir):
 
         for pipeline in pipelines:
             data = results[pipeline][metric]
-            ax.hist(data, bins=15, alpha=0.5, color=colors[pipeline],
-                   label=labels[pipeline], edgecolor='black')
+            ax.hist(data, bins=15, alpha=0.5, color=colors[pipeline],label=labels[pipeline], edgecolor='black')
 
         ax.set_xlabel(f'{metric} Deviation', fontsize=12)
         ax.set_ylabel('Frequency', fontsize=12)
@@ -876,7 +1013,6 @@ def visualize_statistical_distributions(results, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"Saved distribution plot: {filename}")
     plt.show()
-
 
 def visualize_snr_degradation(validator, output_dir, n_realizations=50, use_reference_rqa=True):
     import matplotlib.pyplot as plt
@@ -904,11 +1040,12 @@ def visualize_snr_degradation(validator, output_dir, n_realizations=50, use_refe
 
         for band in validator.BAND_NAMES:
             freq = validator.SUBBAND_FREQS[band]
-            tau, m = validator.get_analytic_embedding_params(freq)
             subband_signal = subbands_clean[band]
 
             if subband_signal.std() > 0:
                 subband_signal = (subband_signal - subband_signal.mean()) / subband_signal.std()
+
+            tau, m = validator.get_analytic_embedding_params(freq=freq, signal=subband_signal)
 
             ref_epsilons[pipeline][band] = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal=subband_signal, tau=tau, m=m,target_rr=0.1)
 
@@ -972,8 +1109,124 @@ def visualize_snr_degradation(validator, output_dir, n_realizations=50, use_refe
 
     return pd.DataFrame(raw_data_for_stats)
 
+def visualize_frobenius_distances(master_df, output_dir):
+    """
+    Create comprehensive visualizations for Frobenius distances across subbands and pipelines.
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    sns.set_theme(style="whitegrid", font_scale=1.1)
+
+    pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
+    bands = ['D1', 'D2', 'D3', 'D4', 'A4']
+
+    colors = ['#2ecc71', '#3498db', '#e74c3c', '#34495e']
+    labels = {'swt_recon': 'SWT-R', 'swt_direct': 'SWT-D', 'dwt_recon': 'DWT-R', 'dwt_direct': 'DWT-D'}
+
+    # Filter out NaN values
+    df_filtered = master_df[master_df['frobenius_distance'].notna()].copy()
+
+    # Plot 1: Frobenius distances across subbands for each pipeline
+    fig1, ax1 = plt.subplots(1, 1, figsize=(12, 7))
+
+    width = 0.2
+    x = np.arange(len(bands))
+
+    for i, pipe in enumerate(pipelines):
+        pipe_df = df_filtered[df_filtered['pipeline'] == pipe]
+        means = []
+        sems = []
+        for band in bands:
+            band_data = pipe_df[pipe_df['band'] == band]['frobenius_distance']
+            if len(band_data) > 0:
+                means.append(band_data.mean())
+                sems.append(band_data.sem())
+            else:
+                means.append(0)
+                sems.append(0)
+
+        ax1.bar(x + i * width, means, width, yerr=sems,
+               label=labels[pipe], color=colors[i], alpha=0.7,
+               edgecolor='black', capsize=4)
+
+    ax1.set_xlabel('Subband', fontweight='bold')
+    ax1.set_ylabel('Frobenius Distance', fontweight='bold')
+    ax1.set_title('Frobenius Distance Across Subbands', fontweight='bold', pad=15)
+    ax1.set_xticks(x + width * 1.5)
+    ax1.set_xticklabels(bands)
+    ax1.legend(frameon=True)
+    ax1.grid(axis='y', alpha=0.3)
+    sns.despine(ax=ax1)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'frobenius_subbands.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig1)
+
+    # Plot 2: Violin plot showing distribution of Frobenius distances for each pipeline
+    fig2, ax2 = plt.subplots(1, 1, figsize=(10, 7))
+
+    plot_data = []
+    plot_labels = []
+    for pipe in pipelines:
+        pipe_data = df_filtered[df_filtered['pipeline'] == pipe]['frobenius_distance'].values
+        if len(pipe_data) > 0:
+            plot_data.append(pipe_data)
+            plot_labels.append(labels[pipe])
+
+    if len(plot_data) > 0:
+        parts = ax2.violinplot(plot_data, positions=range(len(plot_labels)),
+                              showmeans=True, showmedians=True, widths=0.6)
+
+        for i, pc in enumerate(parts['bodies']):
+            pc.set_facecolor(colors[i])
+            pc.set_alpha(0.6)
+            pc.set_edgecolor('black')
+            pc.set_linewidth(1.2)
+
+        parts['cmedians'].set_edgecolor('#2c3e50')
+        parts['cmedians'].set_linewidth(2)
+        parts['cmeans'].set_edgecolor('red')
+        parts['cmeans'].set_linewidth(2)
+
+        ax2.set_xticks(range(len(plot_labels)))
+        ax2.set_xticklabels(plot_labels)
+        ax2.set_ylabel('Frobenius Distance', fontweight='bold')
+        ax2.set_title('Frobenius Distance Distribution by Pipeline', fontweight='bold', pad=15)
+        ax2.grid(axis='y', alpha=0.3)
+        ax2.set_ylim(bottom=0)
+        sns.despine(ax=ax2)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'frobenius_distributions.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig2)
+
+    # Plot 3: Heatmap showing average Frobenius distances
+    fig3, ax3 = plt.subplots(1, 1, figsize=(10, 6))
+
+    heatmap_data = np.zeros((len(pipelines), len(bands)))
+    for i, pipe in enumerate(pipelines):
+        for j, band in enumerate(bands):
+            band_data = df_filtered[(df_filtered['pipeline'] == pipe) & (df_filtered['band'] == band)]['frobenius_distance']
+            if len(band_data) > 0:
+                heatmap_data[i, j] = band_data.mean()
+            else:
+                heatmap_data[i, j] = np.nan
+
+    sns.heatmap(heatmap_data, annot=True, fmt='.2f', cmap='YlOrRd',
+                xticklabels=bands, yticklabels=[labels[p] for p in pipelines],
+                ax=ax3, cbar_kws={'label': 'Frobenius Distance'})
+    ax3.set_title('Average Frobenius Distance Heatmap', fontweight='bold', pad=15)
+    ax3.set_xlabel('Subband', fontweight='bold')
+    ax3.set_ylabel('Pipeline', fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'frobenius_heatmap.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig3)
+
+    print(f"Saved Frobenius distance visualizations to {output_dir}")
 
 if __name__ == '__main__':
     n_trials = 100
-    run_statistical_comparison(n_trials=n_trials)
+    run_statistical_comparison(is_sine=True, is_lorenz=False, n_trials=n_trials)
     # main()
