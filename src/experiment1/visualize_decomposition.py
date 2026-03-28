@@ -4,6 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
+from src.recurrence_plot.AMI import AMI
+from src.recurrence_plot.FNN import FNN
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipelines.pipeline_wavelets import Pipeline
@@ -36,11 +39,9 @@ class DecompositionVisualizer:
     def generate_composite_sine(self):
         t = np.arange(self.N) / self.FS
         signal = np.zeros(self.N)
-        #
+
         for band, freq in self.SUBBAND_FREQS.items():
             signal += np.sin(2 * np.pi * freq * t)
-        #
-        # signal += np.sin(2 * np.pi * 2 * t)
 
         return signal
 
@@ -125,170 +126,189 @@ class DecompositionVisualizer:
 
         return fig
 
+
+    def get_optimal_parameters(self, signal):
+        ami = AMI(signal=signal)
+        tau = int(ami.get_first_minimum())
+        fnn = FNN(tau=tau, signal=signal)
+        m = fnn.get_optimal_dimension()
+        return tau, m
+
     def visualize_single_scale_rp(self, snr_levels=[np.inf, 20, 10, 5]):
+        from matplotlib.gridspec import GridSpec
+        import matplotlib.pyplot as plt
+
         signal_clean = self.generate_composite_sine()
 
-        tau = RecurrencePlotGenerator.estimate_time_delay_analytic(12, self.FS)
-        m = RecurrencePlotGenerator.estimate_embedding_dim_analytic()
-
-        # Find reference epsilon from clean signal
         signal_norm = signal_clean.copy()
         if signal_norm.std() > 0:
             signal_norm = (signal_norm - signal_norm.mean()) / signal_norm.std()
+
+        tau, m = self.get_optimal_parameters(signal_norm)
         ref_epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal_norm, tau, m, target_rr=0.1)
-        print(ref_epsilon)
 
         for snr in snr_levels:
-            fig = plt.figure(figsize=(16, 5))
-            gs = GridSpec(1, 2, figure=fig, hspace=0.3, wspace=0.3, width_ratios=[1, 1.2])
+            # 1. Increase height and use constrained_layout to prevent title/label cutoff
+            fig = plt.figure(figsize=(20, 7), constrained_layout=True)
+            gs = GridSpec(1, 3, figure=fig, width_ratios=[1.2, 1, 1])
 
             snr_label = 'Clean' if np.isinf(snr) else f'SNR {snr}dB'
-            fig.suptitle(f'Single-Scale: {snr_label}',
-                        fontsize=16, fontweight='bold', y=0.98)
+            fig.suptitle(f'Single-Scale Analysis: {snr_label}', fontsize=18, fontweight='bold')
 
-            # Add noise
             signal_noisy = self.add_awgn(signal_clean, snr)
 
-            # Left: Signal
-            ax_signal = fig.add_subplot(gs[0, 0])
-            t = np.arange(len(signal_noisy)) / self.FS
-            ax_signal.plot(t, signal_noisy, linewidth=0.8, color='#1f77b4')
-            ax_signal.set_title('Composite Signal', fontsize=12, fontweight='bold')
-            ax_signal.set_xlabel('Time (s)', fontsize=10)
-            ax_signal.set_ylabel('Amplitude', fontsize=10)
-            ax_signal.grid(alpha=0.3)
-
-            # Right: RP
-            ax_rp = fig.add_subplot(gs[0, 1])
-
-            # Normalize for RP
             signal_rp = signal_noisy.copy()
             if signal_rp.std() > 0:
                 signal_rp = (signal_rp - signal_rp.mean()) / signal_rp.std()
 
-            # Compute RP
+            # --- Subplot 1: Signal Plot ---
+            ax_signal = fig.add_subplot(gs[0, 0])
+            t = np.arange(len(signal_noisy)) / self.FS
+            ax_signal.plot(t, signal_noisy, linewidth=1.0, color='#1f77b4')
+            ax_signal.set_title('Composite Time Series', fontsize=14, fontweight='bold')
+            ax_signal.set_xlabel('Time (s)', fontsize=12)
+            ax_signal.set_ylabel('Amplitude', fontsize=12)
+            ax_signal.set_aspect('auto')  # Ensure signal is rectangular/readable
+            ax_signal.grid(alpha=0.3)
+
+
             rp_matrix, rqa_result = self.compute_rp(signal_rp, tau, m, ref_epsilon)
+
+
+            ax_rp = fig.add_subplot(gs[0, 1])
 
             if rp_matrix is not None:
                 ax_rp.imshow(rp_matrix, cmap='binary', origin='upper', aspect='equal')
-                if rqa_result is not None:
-                    ax_rp.set_title(f'RP: τ={tau}, m={m}, DET={rqa_result.determinism:.3f}', fontsize=12)
-                else:
-                    ax_rp.set_title(f'RP: τ={tau}, m={m}', fontsize=12)
-                ax_rp.set_xlabel('Time i', fontsize=10)
-                ax_rp.set_ylabel('Time j', fontsize=10)
-            else:
-                ax_rp.text(0.5, 0.5, 'RP Failed', ha='center', va='center')
-                ax_rp.set_title(f'RP: τ={tau}, m={m}', fontsize=12)
+                det_val = rqa_result.determinism if rqa_result else 0.0
+                ax_rp.set_title(f'Binary RP \n tau={tau} \n m={m}', fontsize=12,fontweight='bold')
+                ax_rp.set_xlabel('Time index $i$', fontsize=12)
+                ax_rp.set_ylabel('Time index $j$', fontsize=12)
 
-            ax_rp.set_xticks([])
-            ax_rp.set_yticks([])
+            ax_utrp = fig.add_subplot(gs[0, 2])
+            utrp_matrix = self.get_unthresholded_matrix(signal_rp, tau, m)
 
-            # Save
+            if utrp_matrix is not None:
+                im_utrp = ax_utrp.imshow(utrp_matrix, cmap='magma', origin='upper', aspect='equal')
+                ax_utrp.set_title(f'UTRP \n tau={tau} \n m={m}', fontsize=12, fontweight='bold')
+                ax_utrp.set_xlabel('Time index $i$', fontsize=12)
+                ax_utrp.set_ylabel('Time index $j$', fontsize=12)
+                ax_utrp.sharey(ax_rp)
+                plt.colorbar(im_utrp, ax=ax_utrp, shrink=0.8, pad=0.05).set_label('Euclidean Distance')
+
+
             clean_snr_str = "clean" if np.isinf(snr) else f"snr_{int(snr)}"
-            filename = f'single_scale_rp_{clean_snr_str}.png'
-            plt.savefig(os.path.join(self.OUTPUT_DIR, filename), dpi=200, bbox_inches='tight')
-            print(f"Saved: {filename}")
+            filename = f'single_scale_rp_viz_{clean_snr_str}.png'
+            plt.savefig(os.path.join(self.OUTPUT_DIR, filename), dpi=300, bbox_inches='tight')
             plt.show()
 
     def visualize_decomposition_with_rps(self, pipeline_name, snr_levels=[np.inf, 20, 10, 5]):
+        from matplotlib.gridspec import GridSpec
+        import matplotlib.pyplot as plt
+
         signal_clean = self.generate_composite_sine()
 
-        # 1. Pre-calculate reference epsilons
         subbands_clean = self.decompose_signal(signal_clean, pipeline_name)
-        ref_epsilons = {}
+        ref_params = {}
         for band in self.BAND_NAMES:
-            freq = self.SUBBAND_FREQS[band]
-            tau, m = self.get_analytic_embedding_params(freq)
-            subband_signal = subbands_clean[band]
-            if subband_signal.std() > 0:
-                subband_signal = (subband_signal - subband_signal.mean()) / subband_signal.std()
-            ref_epsilons[band] = RecurrencePlotGenerator.find_epsilon_for_target_rr(subband_signal, tau, m,
-                                                                                    target_rr=0.1)
+            sub_sig = subbands_clean[band]
+            if sub_sig.std() > 0:
+                sub_sig = (sub_sig - sub_sig.mean()) / sub_sig.std()
+
+            tau, m = self.get_optimal_parameters(sub_sig)
+            epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(sub_sig, tau, m, target_rr=0.1)
+            ref_params[band] = {'tau': tau, 'm': m, 'epsilon': epsilon}
 
         name_mapping = {
-            "swt_recon": "SWT Time Domain Reconstruction",
-            "dwt_recon": "DWT Time Domain Reconstruction",
-            "dwt_direct": "DWT Wavelet Coefficients",
-            "swt_direct": "SWT Wavelet Coefficients",
+            "swt_recon": "SWT Reconstruction (Time Domain)",
+            "dwt_recon": "DWT Reconstruction (Time Domain)",
+            "dwt_direct": "DWT Coefficients (Decimated)",
+            "swt_direct": "SWT Coefficients (Non-Decimated)",
         }
 
         for snr in snr_levels:
             n_bands = len(self.BAND_NAMES)
-
-            # --- Layout Tuning ---
-            # We use a wider figure and specific width_ratios to give the RP square space
-            fig = plt.figure(figsize=(16, 4 * n_bands))
-            gs = GridSpec(n_bands, 2, figure=fig, hspace=0.3, wspace=0.2, width_ratios=[1, 1])
+            # Increase figure height to accommodate all subbands (approx 4 units per band)
+            fig = plt.figure(figsize=(22, 4 * n_bands), constrained_layout=True)
+            # 3 Columns: Signal, UTRP, Binary RP
+            gs = GridSpec(n_bands, 3, figure=fig, width_ratios=[1.2, 1, 1])
 
             snr_label = 'Clean' if np.isinf(snr) else f'SNR {snr}dB'
-            # fig.suptitle(f'{name_mapping[pipeline_name]} | Noise: {snr_label}',fontsize=18, fontweight='bold', y=0.94)
-            fig.suptitle(f'{name_mapping[pipeline_name]}',fontsize=18, fontweight='bold', y=0.94)
+            fig.suptitle(f'{name_mapping[pipeline_name]} | Noise: {snr_label}',
+                         fontsize=20, fontweight='bold')
 
             signal_noisy = self.add_awgn(signal_clean, snr)
             subbands = self.decompose_signal(signal_noisy, pipeline_name)
 
             for band_idx, band in enumerate(self.BAND_NAMES):
-                # --- Left: Decomposition Signal ---
-                ax_decomp = fig.add_subplot(gs[band_idx, 0])
+                params = ref_params[band]
                 subband_signal = subbands[band]
+
+                # Standardize signal for RP computation
+                sub_norm = subband_signal.copy()
+                if sub_norm.std() > 0:
+                    sub_norm = (sub_norm - sub_norm.mean()) / sub_norm.std()
+
+                # --- Column 1: Subband Signal ---
+                ax_sig = fig.add_subplot(gs[band_idx, 0])
                 t_sub = np.arange(len(subband_signal)) / self.FS
-
-                ax_decomp.plot(t_sub, subband_signal, linewidth=0.8, color='#1f77b4')
-                ax_decomp.set_title(f'Subband {band} ({self.SUBBAND_FREQS[band]} Hz)', fontsize=12, fontweight='bold')
-                ax_decomp.set_ylabel('Amplitude', fontsize=10)
-                ax_decomp.grid(alpha=0.3)
-
+                ax_sig.plot(t_sub, subband_signal, linewidth=1.0, color='#1f77b4')
+                ax_sig.set_title(f'Subband {band} ({self.SUBBAND_FREQS[band]} Hz)', fontsize=14, fontweight='bold')
+                ax_sig.set_ylabel('Amplitude', fontsize=12)
+                ax_sig.grid(alpha=0.3)
+                ax_sig.set_aspect('auto')
                 if band_idx == n_bands - 1:
-                    ax_decomp.set_xlabel("Time (s)" if "recon" in pipeline_name else "Samples", fontsize=10)
+                    ax_sig.set_xlabel("Time (s)" if "recon" in pipeline_name else "Samples")
 
-                # --- Right: Recurrence Plot (Matching PAFVisualizer style) ---
-                ax_rp = fig.add_subplot(gs[band_idx, 1])
-                freq = self.SUBBAND_FREQS[band]
-                tau, m = self.get_analytic_embedding_params(freq)
-                epsilon = ref_epsilons[band]
+                ax_utrp = fig.add_subplot(gs[band_idx, 1])
+                utrp_matrix = self.get_unthresholded_matrix(sub_norm, params['tau'], params['m'])
 
-                subband_rp = subband_signal.copy()
-                if subband_rp.std() > 0:
-                    subband_rp = (subband_rp - subband_rp.mean()) / subband_rp.std()
+                if utrp_matrix is not None:
+                    im_utrp = ax_utrp.imshow(utrp_matrix, cmap='magma', origin='lower', aspect='equal')
+                    ax_utrp.set_title(f'UTRP \n tau={params['tau']:.1f} \n m = {params['m']:.1f}', fontsize=12, fontweight='bold')
+                    ax_utrp.set_xlabel('Time index $i$', fontsize=10)
+                    ax_utrp.set_ylabel('Time index $j$', fontsize=10)
+                    plt.colorbar(im_utrp, ax=ax_utrp, shrink=0.7, pad=0.04)
 
-                rp_matrix, rqa_result = self.compute_rp(subband_rp, tau, m, epsilon)
+                ax_rp = fig.add_subplot(gs[band_idx, 2])
+                rp_matrix, rqa_result = self.compute_rp(sub_norm, params['tau'], params['m'], params['epsilon'])
 
                 if rp_matrix is not None:
-                    # Using origin='lower' and aspect='equal' as requested
-                    im = ax_rp.imshow(rp_matrix, cmap='binary', origin='upper', aspect='equal', interpolation='nearest')
-
-                    det_str = f" | DET={rqa_result.determinism:.3f}" if rqa_result else ""
-                    ax_rp.set_title(f"RP (τ={tau}, m={m}){det_str}", fontsize=12)
-
-                    # Restore Axis Labels
-                    ax_rp.set_xlabel("Time index $i$", fontsize=10)
-                    ax_rp.set_ylabel("Time index $j$", fontsize=10)
-                    ax_rp.tick_params(labelsize=9)
+                    ax_rp.imshow(rp_matrix, cmap='binary', origin='lower', aspect='equal')
+                    det = rqa_result.determinism if rqa_result else 0.0
+                    ax_rp.set_title(f'Binary RP \n tau={params['tau']:.1f} \n m = {params['m']:.1f}', fontsize=12, fontweight='bold')
+                    ax_rp.set_xlabel('Time index $i$', fontsize=10)
+                    ax_rp.set_ylabel('Time index $j$', fontsize=10)
                 else:
-                    ax_rp.text(0.5, 0.5, 'RP Computation Failed', ha='center', va='center')
-
-            # Tighten the overall figure margins
-            plt.subplots_adjust(left=0.08, right=0.92, top=0.90, bottom=0.08)
+                    ax_rp.text(0.5, 0.5, 'Failed', ha='center', va='center')
 
             clean_snr_str = "clean" if np.isinf(snr) else f"snr_{int(snr)}"
-            filename = f'decomp_rp_{pipeline_name}_{clean_snr_str}.png'
-            plt.savefig(os.path.join(self.OUTPUT_DIR, filename), dpi=200, bbox_inches='tight')
-            print(f"Saved: {filename}")
+            filename = f'decomp_full_viz_{pipeline_name}_{clean_snr_str}.png'
+            plt.savefig(os.path.join(self.OUTPUT_DIR, filename), dpi=250, bbox_inches='tight')
+            print(f"Generated decomposition visualization: {filename}")
             plt.show()
+    def get_unthresholded_matrix(self, signal, tau, m):
+        """Explicitly computes the UTRP for Frobenius comparison."""
+        from pyrqa.settings import Settings
+        from pyrqa.analysis_type import Cross
+        from pyrqa.neighbourhood import Unthresholded
+        from pyrqa.metric import EuclideanMetric
+        from pyrqa.computation import RPComputation
+        from pyrqa.time_series import TimeSeries
 
+        # Ensure signal is a TimeSeries object
+        ts = TimeSeries(signal, embedding_dimension=m, time_delay=tau)
+        settings = Settings(ts, analysis_type=Cross,
+                            neighbourhood=Unthresholded(),
+                            similarity_measure=EuclideanMetric,
+                            theiler_corrector=1)
+
+        computation = RPComputation.create(settings, verbose=False)
+        result = computation.run()
+        # This returns the distance matrix
+        return result.recurrence_matrix_reverse_normalized
 
 def main():
-    """Interactive demonstration."""
-
     visualizer = DecompositionVisualizer()
-
-    print("="*60)
-    print("DECOMPOSITION & RP VISUALIZER")
-    print("="*60)
-
-    # Select pipeline
-    print("\nAvailable options:")
     print("  0. single_scale - Single-Scale (No Decomposition)")
     print("  1. swt_recon    - SWT Reconstruction")
     print("  2. swt_direct   - SWT Direct Coefficients")
@@ -307,7 +327,6 @@ def main():
 
     print(f"\nUsing: {pipeline_name}")
 
-    # SNR levels
     snr_input = input("\nEnter SNR levels (comma-separated, use 'inf' for clean) [default: inf,20,10,5]: ").strip()
 
     if snr_input:
