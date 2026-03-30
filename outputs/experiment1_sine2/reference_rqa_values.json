@@ -1,0 +1,62 @@
+{
+  "A4": {
+    "tau": 6,
+    "m": 2,
+    "epsilon": 0.34992874084156256,
+    "DET": 0.989350195523754,
+    "LAM": 0.9997147979139505,
+    "TT": 6.114378270620484,
+    "ENTR": 1.6843019011092266,
+    "L_mean_diagonal": 22.267790262172284,
+    "L_longest_diagonal": 505.0,
+    "L_longest_vertical": 10.0
+  },
+  "D4": {
+    "tau": 3,
+    "m": 2,
+    "epsilon": 0.3996193050262501,
+    "DET": 1.0,
+    "LAM": 0.931919941831541,
+    "TT": 2.3451463790446843,
+    "ENTR": 1.3331352670776737,
+    "L_mean_diagonal": 15.874845105328376,
+    "L_longest_diagonal": 488.0,
+    "L_longest_vertical": 3.0
+  },
+  "D3": {
+    "tau": 2,
+    "m": 3,
+    "epsilon": 0.5217155222328294,
+    "DET": 1.0,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 3.850147601710058,
+    "L_mean_diagonal": 252.0,
+    "L_longest_diagonal": 497.0,
+    "L_longest_vertical": 1.0
+  },
+  "D2": {
+    "tau": 5,
+    "m": 4,
+    "epsilon": 0.7228584618206574,
+    "DET": 0.5643272644859108,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 3.401197381662155,
+    "L_mean_diagonal": 249.0,
+    "L_longest_diagonal": 481.0,
+    "L_longest_vertical": 1.0
+  },
+  "D1": {
+    "tau": 3,
+    "m": 5,
+    "epsilon": 1.5123238231626939e-06,
+    "DET": 1.0,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 4.127134385045091,
+    "L_mean_diagonal": 248.0,
+    "L_longest_diagonal": 492.0,
+    "L_longest_vertical": 1.0
+  }
+}

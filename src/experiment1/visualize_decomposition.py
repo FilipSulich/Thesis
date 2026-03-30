@@ -42,6 +42,8 @@ class DecompositionVisualizer:
 
         for band, freq in self.SUBBAND_FREQS.items():
             signal += np.sin(2 * np.pi * freq * t)
+        #
+        # signal += np.sin(2 * np.pi * t + np.pi/2)
 
         return signal
 
