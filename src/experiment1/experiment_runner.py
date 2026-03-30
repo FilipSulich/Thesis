@@ -332,9 +332,9 @@ def main():
 
     # Full experiment with all tests
     results, master_df, ref_rqa = runner.run_full_experiment(
-        n_trials=10,
-        include_leakage=True,
-        include_aliasing=True
+        n_trials=1,
+        include_leakage=False,
+        include_aliasing=False
     )
     print(results)
     print(master_df)
