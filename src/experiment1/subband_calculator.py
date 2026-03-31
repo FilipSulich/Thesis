@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import json
 
-from src.lorenz_solver.lorenz import LorenzSolver
+from scipy.signal import firwin, filtfilt
+
 from src.recurrence_plot.AMI import AMI
 from src.recurrence_plot.FNN import FNN
 
@@ -18,18 +19,12 @@ sys.path.insert(0, current_dir)
 
 
 class SubbandCalculator:
-    """
-    Calculator class containing all logic and computation methods for subband validation.
-    No visualization methods - pure computation only.
-    """
-
-    def __init__(self, is_sine, is_lorenz):
+    def __init__(self, is_sine):
         self.FS = 128
         self.N = 512
         self.LEVEL = 4
         self.WAVELET = 'db4'
         self.is_sine = is_sine
-        self.is_lorenz = is_lorenz
 
         self.SUBBAND_FREQS = {
             'A4': 2,   # 0-4 Hz
@@ -44,8 +39,6 @@ class SubbandCalculator:
 
         if self.is_sine:
             self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_sine_new'
-        elif self.is_lorenz:
-            self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_lorenz'
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
@@ -77,11 +70,6 @@ class SubbandCalculator:
                 phase = 0
             signal += np.sin(2 * np.pi * freq * t + phase)
 
-        return signal
-
-    def generate_lorenz_system(self, sigma, rho, beta, n_points):
-        lorenz = LorenzSolver(sigma, rho, beta)
-        signal = lorenz.generate_lorenz_signal(n_points, target_fs=self.FS)
         return signal
 
     def get_optimal_params(self, signal):
@@ -330,7 +318,10 @@ class SubbandCalculator:
                 unthresholded=False
             )
             rqa_result, rp_matrix = rp_gen.compute_rqa_binary()
+            recurrence_rate = rqa_result.recurrence_rate
 
+            if np.isnan(recurrence_rate):
+                recurrence_rate = 0.0
             l_mean_diag = rqa_result.average_diagonal_line
             if np.isnan(l_mean_diag): l_mean_diag = 0.0
 
@@ -383,6 +374,7 @@ class SubbandCalculator:
                 'DET': det,
                 'ENTR': rqa_result.entropy_diagonal_lines,
                 'LAM': lam,
+                'RR': recurrence_rate,
                 'L_mean_diagonal': l_mean_diag,
                 'L_longest_diagonal': longest_diagonal,
                 'L_longest_vertical': longest_vertical_line,
@@ -395,6 +387,7 @@ class SubbandCalculator:
                 'DET': 0.0,
                 'ENTR': 0.0,
                 'LAM': 0.0,
+                'RR': 0.0,
                 'L_mean_diagonal': 0.0,
                 'L_longest_diagonal': 0.0,
                 'L_max_vertical': 0.0,

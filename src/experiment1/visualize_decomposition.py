@@ -47,6 +47,50 @@ class DecompositionVisualizer:
 
         return signal
 
+    def generate_lorenz_system(self, sigma=10, rho=28, beta=8/3, n_points=25000, discard=5000):
+        """
+        Generate Lorenz x-variable using 4th-order Runge-Kutta with proper resampling.
+
+        Args:
+            sigma, rho, beta: Lorenz parameters
+            n_points: Total points to generate (including transient)
+            discard: Points to discard as transient
+
+        Returns:
+            signal: Z-score normalized, resampled to 128 Hz
+        """
+        from scipy.signal import resample
+        from scipy.integrate import solve_ivp
+
+        def lorenz_rk4(t, state):
+            x, y, z = state
+            dx_dt = sigma * (y - x)
+            dy_dt = x * (rho - z) - y
+            dz_dt = x * y - beta * z
+            return [dx_dt, dy_dt, dz_dt]
+
+        dt = 0.01
+        t_span = (0, n_points * dt)
+        t_eval = np.arange(0, n_points * dt, dt)
+
+        initial_state = [1.0, 1.0, 1.0]
+        sol = solve_ivp(lorenz_rk4, t_span, initial_state, t_eval=t_eval, method='RK45')
+
+        x = sol.y[0]
+
+        # Discard transient
+        x = x[discard:]
+
+        # Resample to 128 Hz
+        # Original: 100 samples/sec (dt=0.01), Target: 128 samples/sec
+        n_samples_target = int(len(x) * self.FS / 100)
+        x_resampled = resample(x, n_samples_target)
+
+        # Z-score normalize
+        x_resampled = (x_resampled - x_resampled.mean()) / x_resampled.std()
+
+        return x_resampled
+
     def add_awgn(self, signal, snr_db):
         if snr_db is None or np.isinf(snr_db):
             return signal
@@ -139,9 +183,10 @@ class DecompositionVisualizer:
     def visualize_single_scale_rp(self, snr_levels=[np.inf, 20, 10, 5]):
         from matplotlib.gridspec import GridSpec
         import matplotlib.pyplot as plt
-
+        #
         signal_clean = self.generate_composite_sine()
-
+        # signal_clean = self.generate_lorenz_system()
+        #
         signal_norm = signal_clean.copy()
         if signal_norm.std() > 0:
             signal_norm = (signal_norm - signal_norm.mean()) / signal_norm.std()
@@ -208,6 +253,7 @@ class DecompositionVisualizer:
         import matplotlib.pyplot as plt
 
         signal_clean = self.generate_composite_sine()
+        # signal_clean = self.generate_lorenz_system()
 
         subbands_clean = self.decompose_signal(signal_clean, pipeline_name)
         ref_params = {}
@@ -245,17 +291,18 @@ class DecompositionVisualizer:
                 params = ref_params[band]
                 subband_signal = subbands[band]
 
-                # Standardize signal for RP computation
                 sub_norm = subband_signal.copy()
                 if sub_norm.std() > 0:
                     sub_norm = (sub_norm - sub_norm.mean()) / sub_norm.std()
 
-                # --- Column 1: Subband Signal ---
                 ax_sig = fig.add_subplot(gs[band_idx, 0])
                 t_sub = np.arange(len(subband_signal)) / self.FS
                 ax_sig.plot(t_sub, subband_signal, linewidth=1.0, color='#1f77b4')
                 ax_sig.set_title(f'Subband {band} ({self.SUBBAND_FREQS[band]} Hz)', fontsize=14, fontweight='bold')
-                ax_sig.set_ylabel('Amplitude', fontsize=12)
+                if pipeline_name == 'swt_direct' or pipeline_name == 'dwt_direct':
+                    ax_sig.set_ylabel('Magnitude', fontsize=12)
+                else :
+                    ax_sig.set_xlabel('Amplitude', fontsize=12)
                 ax_sig.grid(alpha=0.3)
                 ax_sig.set_aspect('auto')
                 if band_idx == n_bands - 1:
@@ -356,3 +403,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
