@@ -3,16 +3,13 @@ import sys
 import numpy as np
 import pandas as pd
 import json
-
-from scipy.signal import firwin, filtfilt
-
 from src.recurrence_plot.AMI import AMI
 from src.recurrence_plot.FNN import FNN
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipelines.pipeline_wavelets import Pipeline
-from recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
+from src.pipelines.pipeline_wavelets import Pipeline
+from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
@@ -36,9 +33,9 @@ class SubbandCalculator:
 
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
         self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
+        self.PIPELINES2 = ['swt_recon', 'swt_direct', 'dwt_recon']
 
-        if self.is_sine:
-            self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_sine_new'
+        self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_sine_new'
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
@@ -72,13 +69,31 @@ class SubbandCalculator:
 
         return signal
 
-    def get_optimal_params(self, signal):
+
+    @staticmethod
+    def get_optimal_params(signal):
+        """
+        Compute optimal tau and m for time delay embedding.
+
+        Uses AMI for tau and FNN for m. If AMI fails to find a minimum,
+        falls back to tau = max(1, len(signal) // 100).
+        """
         ami = AMI(signal)
         tau = ami.get_first_minimum()
+
+        if tau is None:
+            # Fallback: use 1% of signal length or minimum of 1
+            tau = max(1, len(signal) // 100)
+            print(f"  Warning: AMI found no minimum, using fallback tau={tau}")
+
         fnn = FNN(signal=signal, tau=tau)
         m = fnn.get_optimal_dimension()
 
         return tau, m
+    @staticmethod
+    def get_epsilon(signal, tau, m, target_rr=0.1):
+        return RecurrencePlotGenerator.find_epsilon_for_target_rr(signal, tau, m, target_rr)
+
 
     def generate_reference_rqa_values(self, save_path=None):
         if save_path is None:
@@ -95,7 +110,7 @@ class SubbandCalculator:
                 pure_sine = (pure_sine - pure_sine.mean()) / pure_sine.std()
 
             tau, m = self.get_optimal_params(pure_sine)
-            epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal=pure_sine, tau=tau, m=m, target_rr=0.1)
+            epsilon = self.get_epsilon(pure_sine, tau, m)
 
             metrics = self.compute_rp_metrics(pure_sine, tau, m, epsilon, compute_distance_matrix=True)
 
@@ -342,7 +357,6 @@ class SubbandCalculator:
 
             distance_matrix = None
             if compute_distance_matrix:
-                # Compute unthresholded distance matrix
                 rp_gen_unthresh = RecurrencePlotGenerator(
                     signal=signal,
                     time_delay=tau,

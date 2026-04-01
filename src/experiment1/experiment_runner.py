@@ -8,8 +8,8 @@ from src.experiment1.subband_plotter import SubbandPlotter
 
 
 class ExperimentRunner:
-    def __init__(self, is_sine=True, is_lorenz=False):
-        self.calculator = SubbandCalculator(is_sine=is_sine, is_lorenz=is_lorenz)
+    def __init__(self, is_sine=True):
+        self.calculator = SubbandCalculator(is_sine=is_sine)
         self.plotter = SubbandPlotter(
             self.calculator.OUTPUT_DIR,
             self.calculator.BAND_NAMES,
@@ -41,6 +41,7 @@ class ExperimentRunner:
 
             for pipe in self.calculator.PIPELINES:
                 df, _ = self.calculator.validate_pipeline(sig, pipe, ref_rqa, ref_data)
+
                 all_trial_data.append(df)
 
                 results[pipe]['det_deviation'].append(df['det_deviation'].mean())
@@ -90,6 +91,9 @@ class ExperimentRunner:
 
         if include_aliasing and df_inv is not None:
             self.plotter.visualize_shift_invariance(df_inv)
+
+        self.run_statistical_comparison(n_trials)
+
         self.plotter.visualize_absolute_metrics(master_df)
 
         self.plotter.visualize_bar_comparison_pro(results, master_df, ref_rqa)
@@ -97,6 +101,13 @@ class ExperimentRunner:
         self.plotter.visualize_frobenius_distances(master_df)
 
         # self.plotter.plot_cross_band_summary(master_df)
+
+        summary_df = self.summarize_results(results)
+        summary_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'summary_metrics.csv'), index=False)
+
+        disc_df = self.compute_metric_discriminative_power(results)
+        disc_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'metric_discriminative_power.csv'), index=False)
+
 
         return results, master_df, ref_rqa
 
@@ -133,31 +144,36 @@ class ExperimentRunner:
 
         all_trial_data = []
 
+        METRICS = ['det_deviation', 'lam_deviation', 'tt_deviation',
+                   'hamming_distance', 'ibf', 'rp_pattern_corr', 'frobenius_distance']
+
+        # One row per (trial, pipeline) — no band-level rows here
+        aggregated_rows = []
+
         for trial in range(n_trials):
             if (trial + 1) % 10 == 0:
                 print(f"  Trial {trial + 1}/{n_trials}...")
 
             signal = self.calculator.generate_composite_sine(random_phase=True)
 
-            for pipeline in pipelines:
-                df, _ = self.calculator.validate_pipeline(signal, pipeline, reference_rqa=reference_rqa, reference_data=reference_data)
-                all_trial_data.append(df)
+            for pipeline in self.calculator.PIPELINES:
+                # Single call per pipeline per trial
+                df, _ = self.calculator.validate_pipeline(
+                    signal, pipeline,
+                    reference_rqa=reference_rqa,
+                    reference_data=reference_data
+                )
 
-            for pipeline in pipelines:
-                df, _ = self.calculator.validate_pipeline(signal, pipeline, reference_rqa=reference_rqa, reference_data=reference_data)
+                # Aggregate across bands — one observation per (trial, pipeline)
+                row = {'trial': trial, 'pipeline': pipeline}
+                for metric in METRICS:
+                    if metric in df.columns:
+                        row[metric] = df[metric].mean()
+                aggregated_rows.append(row)
 
-                results[pipeline]['det_deviation'].append(df['det_deviation'].mean())
-                results[pipeline]['lam_deviation'].append(df['lam_deviation'].mean())
-                results[pipeline]['tt_deviation'].append(df['tt_deviation'].mean())
-                results[pipeline]['hamming_distance'].append(df['hamming_distance'].mean())
-                results[pipeline]['ibf'].append(df['ibf'].mean())
-                results[pipeline]['rp_pattern_corr'].append(df['rp_pattern_corr'].mean())
-                results[pipeline]['frobenius_distance'].append(df['frobenius_distance'].mean())
+        agg_df = pd.DataFrame(aggregated_rows)
 
-        for pipeline in pipelines:
-            for metric in results[pipeline].keys():
-                results[pipeline][metric] = np.array(results[pipeline][metric])
-
+        # Statistical comparison: across n_trials observations per pipeline
         comparisons = [
             ('swt_recon', 'swt_direct', 'SWT Recon vs SWT Direct'),
             ('swt_recon', 'dwt_recon', 'SWT Recon vs DWT Recon'),
@@ -168,67 +184,76 @@ class ExperimentRunner:
         ]
 
         stats_results = []
-
         for pipe1, pipe2, label in comparisons:
-            for metric in ['det_deviation', 'lam_deviation', 'tt_deviation',
-                          'hamming_distance', 'ibf', 'rp_pattern_corr', 'frobenius_distance']:
-                data1 = results[pipe1][metric]
-                data2 = results[pipe2][metric]
-
-                if data1.std() < 1e-10 and data2.std() < 1e-10:
+            for metric in METRICS:
+                x = agg_df[agg_df['pipeline'] == pipe1][metric].dropna()
+                y = agg_df[agg_df['pipeline'] == pipe2][metric].dropna()
+                if len(x) < 3 or len(y) < 3:
                     continue
 
-                mann_U, p_value = mannwhitneyu(data1, data2)
-
-                pooled_std = np.sqrt((data1.std()**2 + data2.std()**2) / 2)
-                if pooled_std < 1e-10:
-                    cohens_d = 0.0
-                else:
-                    cohens_d = (data1.mean() - data2.mean()) / pooled_std
-
-                if p_value < 0.001:
-                    sig = '***'
-                elif p_value < 0.01:
-                    sig = '**'
-                elif p_value < 0.05:
-                    sig = '*'
-                else:
-                    sig = 'ns'
+                u, p = mannwhitneyu(x, y, alternative='two-sided')
+                pooled = np.sqrt(((len(x) - 1) * x.var(ddof=1) +
+                                  (len(y) - 1) * y.var(ddof=1)) / (len(x) + len(y) - 2))
+                d = (x.mean() - y.mean()) / pooled if pooled > 1e-9 else np.nan
 
                 stats_results.append({
-                    'comparison': label,
-                    'metric': metric,
-                    'pipeline1': pipe1,
-                    'pipeline2': pipe2,
-                    'mean1': data1.mean(),
-                    'std1': data1.std(),
-                    'mean2': data2.mean(),
-                    'std2': data2.std(),
-                    'mann_whitney_u': mann_U,
-                    'p_value': p_value,
-                    'cohens_d': cohens_d,
-                    'significance': sig
+                    'comparison': label, 'metric': metric,
+                    'pipeline1': pipe1, 'pipeline2': pipe2,
+                    'mean1': x.mean(), 'std1': x.std(),
+                    'mean2': y.mean(), 'std2': y.std(),
+                    'u_stat': u, 'p_value': p, 'cohens_d': d,
+                    'significance': '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
                 })
 
         stats_df = pd.DataFrame(stats_results)
-        stats_file = os.path.join(self.calculator.OUTPUT_DIR, 'stats_final.csv')
-        stats_df.to_csv(stats_file, index=False)
+        agg_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'aggregated_trial_metrics.csv'), index=False)
+        stats_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'stats_final.csv'), index=False)
+        return agg_df, stats_df
 
-        master_df = pd.concat(all_trial_data, ignore_index=True)
-        self.plotter.visualize_absolute_metrics(master_df)
-        self.plotter.visualize_bar_comparison_pro(results, master_df, reference_rqa)
-        self.plotter.visualize_frobenius_distances(master_df)
+    def summarize_results(self, results):
+        summary = []
 
-        return results, stats_df
+        for pipe, metrics in results.items():
+            for metric, values in metrics.items():
+                values = np.array(values)
 
+                summary.append({
+                    'pipeline': pipe,
+                    'metric': metric,
+                    'mean': values.mean(),
+                    'std': values.std()
+                })
+
+        return pd.DataFrame(summary)
+
+    def compute_metric_discriminative_power(self, results):
+        from scipy.stats import kruskal
+
+        metrics = list(next(iter(results.values())).keys())
+        pipelines = list(results.keys())
+
+        rows = []
+
+        for metric in metrics:
+            data = [results[p][metric] for p in pipelines]
+
+            stat, p = kruskal(*data)
+
+            rows.append({
+                'metric': metric,
+                'kruskal_stat': stat,
+                'p_value': p
+            })
+
+        return pd.DataFrame(rows).sort_values('p_value')
 
 def main():
-    runner = ExperimentRunner(is_sine=True, is_lorenz=False)
+    runner = ExperimentRunner(is_sine=True)
 
     results, master_df, ref_rqa = runner.run_full_experiment(
-        n_trials=1,
-        include_leakage=False,
-        include_aliasing=False
+        n_trials=100,
+        include_leakage=True,
+        include_aliasing=True
     )
 
 if __name__ == '__main__':

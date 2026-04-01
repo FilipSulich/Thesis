@@ -19,7 +19,7 @@ HDF5_PATH  = DATA_DIR / 'paf_segments.h5'
 
 SAMPLING_FREQ  = 128
 SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "A4"]
-WAVELET        = 'db4'
+WAVELET        = 'db8'
 
 
 class PAFVisualizer:
