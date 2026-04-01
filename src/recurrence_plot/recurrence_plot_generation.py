@@ -180,21 +180,8 @@ class RecurrencePlotGenerator:
 
     @staticmethod
     def find_epsilon_for_target_rr(signal, tau, m, target_rr=0.1):
-        """
-        Find epsilon that achieves target recurrence rate using bisection.
-
-        Args:
-            signal: Input signal
-            tau: Embedding delay
-            m: Embedding dimension
-            target_rr: Target recurrence rate
-
-        Returns:
-            epsilon: Threshold value
-        """
         from scipy.spatial.distance import pdist, squareform
 
-        # Embed signal
         n = len(signal) - (m - 1) * tau
         if n < 10:
             return 0.1
@@ -202,7 +189,6 @@ class RecurrencePlotGenerator:
         embedded = np.array([signal[i:i + m * tau:tau] for i in range(n)])
         distances = squareform(pdist(embedded, metric='euclidean'))
 
-        # Find epsilon range
         all_dists = distances[np.triu_indices_from(distances, k=1)]
         eps_min, eps_max = np.percentile(all_dists, 1), np.percentile(all_dists, 20)
 

@@ -1,16 +1,13 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import numpy as np
-import pandas as pd
+
+from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 
 class SubbandPlotter:
-    """
-    Plotter class containing all visualization methods for subband validation.
-    No computation logic - pure visualization only.
-    """
-
     def __init__(self, output_dir, band_names, subband_freqs, fs):
         self.output_dir = output_dir
         self.BAND_NAMES = band_names
@@ -19,10 +16,6 @@ class SubbandPlotter:
         sns.set_theme(style="whitegrid", font_scale=1.1)
 
     def plot_leakage_matrices(self, df):
-        """Plot leakage heatmaps for all pipelines."""
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-
         pipelines = df['pipeline'].unique()
         fig, axes = plt.subplots(1, len(pipelines), figsize=(18, 5))
 
@@ -43,7 +36,6 @@ class SubbandPlotter:
         print(f"Saved: {os.path.join(self.output_dir, 'leakage_matrices.png')}")
 
     def visualize_absolute_metrics(self, master_df):
-        """Plot absolute structural metrics (Hamming distance and RP correlation)."""
         import matplotlib.pyplot as plt
 
         struct_df = master_df[master_df['pipeline'] != 'dwt_direct']
@@ -103,12 +95,6 @@ class SubbandPlotter:
         print(f"Saved: {os.path.join(self.output_dir, 'structural_metrics_filtered.png')}")
 
     def visualize_bar_comparison_pro(self, results, master_df, reference_rqa):
-        """Create professional violin plots for RQA deviations and absolute metrics."""
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import os
-        import numpy as np
-
         sns.set_theme(style="whitegrid", font_scale=1.1)
 
         pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
@@ -239,10 +225,6 @@ class SubbandPlotter:
         plt.show()
 
     def visualize_snr_degradation(self, calculator, n_realizations=50, use_reference_rqa=True):
-        """Visualize SNR degradation curves for RQA metrics."""
-        import matplotlib.pyplot as plt
-        from recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
-
         reference_rqa = None
         if use_reference_rqa:
             ref_path = os.path.join(calculator.OUTPUT_DIR, 'reference_rqa_values.json')
@@ -271,7 +253,7 @@ class SubbandPlotter:
                 if subband_signal.std() > 0:
                     subband_signal = (subband_signal - subband_signal.mean()) / subband_signal.std()
 
-                tau, m = calculator.get_analytic_embedding_params(freq=freq, signal=subband_signal)
+                tau, m = calculator.get_embedding_params(signal=subband_signal)
 
                 ref_epsilons[pipeline][band] = RecurrencePlotGenerator.find_epsilon_for_target_rr(signal=subband_signal, tau=tau, m=m,target_rr=0.1)
 
@@ -336,7 +318,6 @@ class SubbandPlotter:
         return pd.DataFrame(raw_data_for_stats)
 
     def visualize_frobenius_distances(self, master_df):
-        """Create comprehensive visualizations for Frobenius distances."""
         import matplotlib.pyplot as plt
         import seaborn as sns
 
