@@ -1,8 +1,6 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
-
 import h5py
 import matplotlib.pyplot as plt
 import sys
@@ -10,8 +8,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import wavelets.stationary_wavelet_transform as stationary_wavelet
-from data_cleaning.data_cleaner import DataCleaner
+import src.wavelets.stationary_wavelet_transform as stationary_wavelet
+from src.data_cleaning.data_cleaner import DataCleaner
 
 DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted_clean/paf1')
 HDF5_PATH  = DATA_DIR / 'paf_segments.h5'
@@ -88,26 +86,6 @@ class PAFVisualizer:
 
         return reconstructions
 
-    def decompose_signal_coeffs(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
-        """SWT decomposition returning raw coefficients (no reconstruction)."""
-        swt    = stationary_wavelet.SWT(wavelet=WAVELET)
-        coeffs = swt.decompose(signal, level=4)
-
-        coefficients = {}
-        SWT_LEVEL = len(coeffs)
-
-        # Detail coefficients D1-D4
-        for i in range(SWT_LEVEL):
-            label = f"D{SWT_LEVEL - i}"
-            # coeffs[i] is a tuple of (cA, cD), we want the detail coefficients (cD)
-            coefficients[label] = self.cleaner.preprocess_subband(coeffs[i][1])
-
-        # Approximation coefficients A4
-        # coeffs[0] is the highest level, use approximation part (cA)
-        coefficients["A4"] = self.cleaner.preprocess_subband(coeffs[0][0])
-
-        return coefficients
-
     def compute_rp(
         self,
         signal: np.ndarray,
@@ -182,167 +160,6 @@ class PAFVisualizer:
         )
         result = RPComputation.create(settings, verbose=False).run()
         return result.recurrence_matrix_reverse_normalized
-
-    def compute_rp_from_coefficients(
-        self,
-        coefficients: np.ndarray,
-        time_delay: int,
-        embedding_dim: int,
-        epsilon_method: str = 'percentile',
-        epsilon_factor: float = 0.05,
-    ) -> Tuple[np.ndarray, float]:
-        """
-        Compute RP directly from wavelet coefficients without reconstruction.
-
-        Args:
-            coefficients: Wavelet coefficients (1D array)
-            time_delay: Time delay for phase space reconstruction
-            embedding_dim: Embedding dimension
-            epsilon_method: Method for epsilon computation ('percentile', 'max_distance', 'std')
-            epsilon_factor: Factor for epsilon computation
-
-        Returns:
-            Tuple of (recurrence_matrix, epsilon_used)
-        """
-        from pyrqa.time_series import TimeSeries
-        from pyrqa.settings import Settings
-        from pyrqa.analysis_type import Classic
-        from pyrqa.neighbourhood import FixedRadius
-        from pyrqa.metric import EuclideanMetric
-        from pyrqa.computation import RPComputation
-        from scipy.spatial.distance import pdist
-
-        n_points = len(coefficients) - (embedding_dim - 1) * time_delay
-
-        embedded = np.array([
-            coefficients[i: i + embedding_dim * time_delay: time_delay]
-            for i in range(n_points)
-        ])
-
-        if len(embedded) > 2000:
-            idx = np.linspace(0, len(embedded) - 1, 2000, dtype=int)
-            embedded_sub = embedded[idx]
-        else:
-            embedded_sub = embedded
-
-        distances = pdist(embedded_sub, metric='euclidean')
-
-        if epsilon_method == 'percentile':
-            epsilon = np.percentile(distances, epsilon_factor * 100)
-        elif epsilon_method == 'max_distance':
-            epsilon = epsilon_factor * np.max(distances)
-        elif epsilon_method == 'std':
-            epsilon = epsilon_factor * np.std(coefficients)
-        else:
-            raise ValueError(f"Unknown epsilon_method: {epsilon_method}")
-
-        ts = TimeSeries(coefficients, embedding_dimension=embedding_dim, time_delay=time_delay)
-        settings = Settings(
-            time_series=ts,
-            analysis_type=Classic,
-            neighbourhood=FixedRadius(epsilon),
-            similarity_measure=EuclideanMetric,
-            theiler_corrector=1,
-        )
-        result = RPComputation.create(settings, verbose=False).run()
-        return result.recurrence_matrix, epsilon
-
-    def decompose_signal_dwt(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        DWT decomposition with reconstruction for each subband.
-
-        Args:
-            signal: Input signal
-
-        Returns:
-            Dictionary mapping subband names (D1, D2, D3, D4, A4) to reconstructed signals
-        """
-        import pywt
-
-        # Perform 4-level DWT decomposition
-        coeffs = pywt.wavedec(signal, WAVELET, level=4)
-
-        # coeffs format: [cA4, cD4, cD3, cD2, cD1]
-        reconstructions = {}
-
-        # Reconstruct A4 (approximation)
-        coeffs_a4 = [coeffs[0]] + [np.zeros_like(c) for c in coeffs[1:]]
-        rec_a4 = pywt.waverec(coeffs_a4, WAVELET)[:len(signal)]
-        reconstructions['A4'] = self.cleaner.preprocess_subband(rec_a4)
-
-        # Reconstruct detail coefficients (D4, D3, D2, D1)
-        for i in range(1, len(coeffs)):
-            level = 5 - i  # Convert index to level number (D4, D3, D2, D1)
-            label = f"D{level}"
-
-            # Zero out all coefficients except the one we want
-            coeffs_single = [np.zeros_like(coeffs[0])] + [np.zeros_like(c) for c in coeffs[1:]]
-            coeffs_single[i] = coeffs[i]
-
-            # Reconstruct
-            rec = pywt.waverec(coeffs_single, WAVELET)[:len(signal)]
-            reconstructions[label] = self.cleaner.preprocess_subband(rec)
-
-        return reconstructions
-
-    def decompose_signal_dwt_coeffs(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        DWT decomposition returning raw coefficients (no reconstruction).
-
-        Args:
-            signal: Input signal
-
-        Returns:
-            Dictionary mapping subband names (D1, D2, D3, D4, A4) to coefficient arrays
-        """
-        import pywt
-
-        # Perform 4-level DWT decomposition
-        coeffs = pywt.wavedec(signal, WAVELET, level=4)
-
-        # coeffs format: [cA4, cD4, cD3, cD2, cD1]
-        coefficients = {}
-
-        # Approximation coefficients (A4)
-        coefficients['A4'] = self.cleaner.preprocess_subband(coeffs[0])
-
-        # Detail coefficients (D4, D3, D2, D1)
-        for i in range(1, len(coeffs)):
-            level = 5 - i  # Convert index to level number (D4, D3, D2, D1)
-            label = f"D{level}"
-            coefficients[label] = self.cleaner.preprocess_subband(coeffs[i])
-
-        return coefficients
-
-    def compute_rp_from_dwt(
-        self,
-        signal: np.ndarray,
-        subband_name: str,
-        epsilon_method: str = 'percentile',
-        epsilon_factor: float = 0.05,
-    ) -> Tuple[np.ndarray, float]:
-        """
-        Compute RP from DWT-based decomposition for a specific subband.
-
-        Args:
-            signal: Input signal
-            subband_name: Name of subband (D1, D2, D3, D4, A4)
-            epsilon_method: Method for epsilon computation
-            epsilon_factor: Factor for epsilon computation
-
-        Returns:
-            Tuple of (recurrence_matrix, epsilon_used)
-        """
-        # Get DWT coefficients
-        dwt_subbands = self.decompose_signal_dwt(signal)
-        coeffs = dwt_subbands[subband_name]
-
-        # Get parameters for this subband
-        params = self.subband_params[subband_name]
-        tau, m = params['tau'], params['m']
-
-        # Compute RP directly from coefficients
-        return self.compute_rp_from_coefficients(coeffs, tau, m, epsilon_method, epsilon_factor)
 
 
     @staticmethod
@@ -646,7 +463,7 @@ class PAFVisualizer:
         show_unthresholded: bool = False,
         save_path: Optional[Path] = None,
     ):
-        # self.plot_signal(idx)
+        self.plot_signal(idx)
         # self.plot_subbands(idx)
         self.plot_subband_rps(idx, epsilon_method=epsilon_method,
                               epsilon_factor=epsilon_factor,
@@ -749,23 +566,8 @@ if __name__ == '__main__':
 
     output_dir = Path(__file__).parent.parent.parent / 'outputs' / 'paf_visualizations_3methods'
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"\nSaving plots to: {output_dir}")
 
     indices = viz.get_random_indices(n_normal=2, n_preaf=2)
 
-    # viz.plot_single_scale_ecg(idx_n)
-    # viz.plot_single_scale_ecg(idx_p)
-
-    # print("\n=== Processing Normal segments ===")
-    for i, idx in enumerate(indices['normal']):
-        sig, label, seg_id, pat_id = viz.get_signal(idx)
-        print(f"\nNormal sample {i+1}: {seg_id} (Patient: {pat_id})")
-        save_prefix = output_dir / f'normal_{i}_{seg_id}'
-        viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
-
-    # print("\n=== Processing Pre-AF segments ===")
-    # for i, idx in enumerate(indices['preaf']):
-    #     sig, label, seg_id, pat_id = viz.get_signal(idx)
-    #     print(f"\nPre-AF sample {i+1}: {seg_id} (Patient: {pat_id})")
-    #     save_prefix = output_dir / f'preaf_{i}_{seg_id}'
-    #     viz.plot_three_methods_comparison(idx, epsilon_method, epsilon_factor, save_prefix)
+    viz.investigate(idx_p)
+    viz.investigate(idx_n)
