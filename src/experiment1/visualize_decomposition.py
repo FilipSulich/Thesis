@@ -19,13 +19,18 @@ os.environ['PYOPENCL_COMPILER_OUTPUT'] = '0'
 
 
 class DecompositionVisualizer:
-    def __init__(self):
+    def __init__(self, seed=None):
         self.FS = 128
         self.N = 1024  # Original length
         self.TRIM = 0  # Samples to discard from each edge
         self.LEVEL = 4
         self.WAVELET = 'db4'
         self.transient = 2000
+        self.seed = seed
+
+        # Set global seed for reproducibility
+        if seed is not None:
+            np.random.seed(seed)
 
         self.SUBBAND_FREQS = {
             'A4': 2, 'D4': 6, 'D3': 12, 'D2': 24, 'D1': 48
@@ -47,9 +52,9 @@ class DecompositionVisualizer:
 
     def _get_selected_signal(self, system_type):
         if system_type == 'lorenz':
-            return self.generate_lorenz_system()[:self.N]
+            return self.generate_lorenz_system(seed=self.seed)[:self.N]
         elif system_type == 'rossler':
-            return self._generate_rossler()
+            return self._generate_rossler(seed=self.seed)
         else:
             return self.generate_composite_sine()
 
@@ -76,7 +81,6 @@ class DecompositionVisualizer:
         print(f"--- Calculating reference parameters ($\\tau, m$) via Trimmed FIR for {system_type.upper()} ---")
         signal_clean = self._get_selected_signal(system_type)
         fir_subbands = self.decompose_fir(signal_clean)
-
         self.reference_params = {}
         for band in self.BAND_NAMES:
             # Apply trimming to eliminate edge effects
@@ -110,19 +114,22 @@ class DecompositionVisualizer:
         x_resampled = resample(x, self.N)
         return (x_resampled - np.mean(x_resampled)) / (np.std(x_resampled) + 1e-9)
 
-    def generate_lorenz_system(self, sigma=10, rho=28, beta=8 / 3, n_points=25000, discard=5000):
+    def generate_lorenz_system(self, sigma=10, rho=28, beta=8 / 3, n_points=25000, discard=5000, seed: int =None):
+        if seed is not None: np.random.seed(seed)
+
         def lorenz_rk4(t, state):
             x, y, z = state
             return [sigma * (y - x), x * (rho - z) - y, x * y - beta * z]
 
-        dt = 0.01;
-        t_span = (0, n_points * dt);
-        t_eval = np.arange(0, n_points * dt, dt)
-        sol = solve_ivp(lorenz_rk4, t_span, [1.0, 1.0, 1.0], t_eval=t_eval, method='RK45')
-        x = sol.y[0][discard:]
-        n_samples_target = int(len(x) * self.FS / 100)
-        x_resampled = resample(x, n_samples_target)
-        return (x_resampled - x_resampled.mean()) / x_resampled.std()
+        total_points = self.N + self.transient
+        t_span = (0, 200);
+        t_eval = np.linspace(t_span[0], t_span[1], total_points)
+        ic = np.random.uniform(-1, 1, 3)
+        sol = solve_ivp(lorenz_rk4, t_span, ic, t_eval=t_eval, method='RK45')
+        x = sol.y[0][self.transient:]
+        x_resampled = resample(x, self.N)
+        return (x_resampled - np.mean(x_resampled)) / (np.std(x_resampled) + 1e-9)
+
 
     def add_awgn(self, signal, snr_db):
         if snr_db is None or np.isinf(snr_db): return signal
@@ -202,8 +209,8 @@ class DecompositionVisualizer:
                 # TRIM the output before computing RP
                 sub_data = self._trim_signal(subbands[band])
                 sub_norm = (sub_data - sub_data.mean()) / (sub_data.std() + 1e-9)
-
-                epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(sub_norm, p['tau'], p['m'], target_rr=0.1)
+                tau, m = self.get_optimal_parameters(sub_norm)
+                epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(sub_norm, tau, m, target_rr=0.1)
 
                 # Signal
                 ax_sig = fig.add_subplot(gs[idx, 0])
@@ -228,7 +235,7 @@ class DecompositionVisualizer:
 
 
 def main():
-    visualizer = DecompositionVisualizer()
+    visualizer = DecompositionVisualizer(seed=43)
 
     print("--- System Selection ---")
     print("  1. Composite Sine\n  2. Lorenz System\n  3. Rössler System")
