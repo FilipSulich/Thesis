@@ -10,19 +10,17 @@ from tqdm import tqdm
 import os
 import sys
 
-from src.lorenz_solver.lorenz import LorenzSolver
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import wavelets.stationary_wavelet_transform as stationary_wavelet
-import recurrence_plot.recurrence_plot_generation as recurrence_plot
-from data_cleaning.data_cleaner import DataCleaner
+import src.wavelets.stationary_wavelet_transform as stationary_wavelet
+import src.recurrence_plot.recurrence_plot_generation as recurrence_plot
+from src.data_cleaning.data_cleaner import DataCleaner
 
 OUTPUT_DIR    = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf_updated')
 HDF5_PATH     = OUTPUT_DIR / 'paf_segments_all_clean_new_cleaning_with_lowpass.h5'
 
 
-SAMPLING_FREQ = 128
+SAMPLING_FREQ = 256
 WAVELET       = 'db4'
 SWT_LEVEL     = 4
 
@@ -157,50 +155,6 @@ class PAFPipeline:
 
         return subbands
 
-    def _decompose_swt_coeffs(self, signal: np.ndarray) -> Dict[str, Optional[np.ndarray]]:
-        """SWT decomposition returning raw coefficients (Method 2: SWT -> Direct)."""
-        swt    = stationary_wavelet.SWT(wavelet=WAVELET)
-        coeffs = swt.decompose(signal, level=SWT_LEVEL)
-
-        coefficients = {}
-        for i in range(SWT_LEVEL):
-            label = f"D{SWT_LEVEL - i}"
-            # Extract detail coefficients (cD)
-            coefficients[label] = self.cleaner.preprocess_subband(coeffs[i][1])
-
-        # Extract approximation coefficients (cA)
-        coefficients['A4'] = self.cleaner.preprocess_subband(coeffs[0][0])
-
-        return coefficients
-
-    def _decompose_dwt(self, signal: np.ndarray) -> Dict[str, Optional[np.ndarray]]:
-        """DWT decomposition with reconstruction (Method 3: DWT + Reconstruction)."""
-        import pywt
-
-        coeffs = pywt.wavedec(signal, WAVELET, level=SWT_LEVEL)
-
-        subbands = {}
-
-        # Reconstruct A4 (approximation)
-        coeffs_a4 = [coeffs[0]] + [np.zeros_like(c) for c in coeffs[1:]]
-        rec_a4 = pywt.waverec(coeffs_a4, WAVELET)[:len(signal)]
-        subbands['A4'] = self.cleaner.preprocess_subband(rec_a4)
-
-        # Reconstruct detail coefficients (D4, D3, D2, D1)
-        for i in range(1, len(coeffs)):
-            level = 5 - i
-            label = f"D{level}"
-
-            # Zero out all coefficients except the one we want
-            coeffs_single = [np.zeros_like(coeffs[0])] + [np.zeros_like(c) for c in coeffs[1:]]
-            coeffs_single[i] = coeffs[i]
-
-            # Reconstruct
-            rec = pywt.waverec(coeffs_single, WAVELET)[:len(signal)]
-            subbands[label] = self.cleaner.preprocess_subband(rec)
-
-        return subbands
-
     def _compute_epsilon(self, signal: np.ndarray, tau: int, m: int) -> float:
         n_points = len(signal) - (m - 1) * tau
         if n_points <= 0:
@@ -229,11 +183,6 @@ class PAFPipeline:
         rqa, _ = rp_gen.compute_rqa_binary()
         return RQAWithEpsilon(rqa=rqa, epsilon=epsilon)
 
-    def _run_lorenz_single(self, tau: int, m: int) -> Dict[str, RQAWithEpsilon]:
-        lorenz = LorenzSolver(sigma=10,rho=28.0,beta=8.0/3.0)
-        signal = lorenz.generate_lorenz_signal()
-        return {'signal': self._compute_rqa(signal, tau, m)}
-
     def _run_single_scale(self, signal: np.ndarray) -> Dict[str, RQAWithEpsilon]:
         tau = self.single_scale_params['tau']
         m   = self.single_scale_params['m']
@@ -258,67 +207,6 @@ class PAFPipeline:
             results[name] = self._compute_rqa(sb, params['tau'], params['m'])
 
         return results
-
-    def _run_multi_scale_swt_direct(
-        self, signal: np.ndarray
-    ) -> Optional[Dict[str, RQAWithEpsilon]]:
-        """Method 2: SWT -> Direct RQA from coefficients"""
-        coeffs = self._decompose_swt_coeffs(signal)
-
-        for name in ['D3', 'D4', 'A4']:
-            if coeffs.get(name) is None:
-                return None
-
-        results = {}
-        for name in ANALYSIS_SUBBANDS:
-            coeff = coeffs.get(name)
-            if coeff is None:
-                continue
-            params = self.subband_params[name]
-            results[name] = self._compute_rqa(coeff, params['tau'], params['m'])
-
-        return results
-
-    def _run_multi_scale_dwt_direct(
-            self, signal: np.ndarray
-    ) -> Optional[Dict[str, RQAWithEpsilon]]:
-        """Method 2: SWT -> Direct RQA from coefficients"""
-        coeffs = self._decompose_dwt(signal)
-
-        for name in ['D3', 'D4', 'A4']:
-            if coeffs.get(name) is None:
-                return None
-
-        results = {}
-        for name in ANALYSIS_SUBBANDS:
-            coeff = coeffs.get(name)
-            if coeff is None:
-                continue
-            params = self.subband_params[name]
-            results[name] = self._compute_rqa(coeff, params['tau'], params['m'])
-
-        return results
-
-    def _run_multi_scale_dwt(
-        self, signal: np.ndarray
-    ) -> Optional[Dict[str, RQAWithEpsilon]]:
-        """Method 3: DWT + Reconstruction -> RQA"""
-        subbands = self._decompose_dwt(signal)
-
-        for name in ['D3', 'D4', 'A4']:
-            if subbands.get(name) is None:
-                return None
-
-        results = {}
-        for name in ANALYSIS_SUBBANDS:
-            sb = subbands.get(name)
-            if sb is None:
-                continue
-            params = self.subband_params[name]
-            results[name] = self._compute_rqa(sb, params['tau'], params['m'])
-
-        return results
-
 
     def run_batch(
         self,
@@ -350,9 +238,6 @@ class PAFPipeline:
         method_map = {
             'single_scale': (self._run_single_scale, "Single-scale RQA", True),
             'swt_recon': (self._run_multi_scale, "Multi-scale RQA (SWT+Recon)", False),
-            'swt_direct': (self._run_multi_scale_swt_direct, "Multi-scale RQA (SWT Direct)", False),
-            'dwt_recon': (self._run_multi_scale_dwt, "Multi-scale RQA (DWT+Recon)", False),
-            'dwt_direct': (self._run_multi_scale_dwt_direct, "Multi-scale RQA (DWT+Recon)", False),
         }
 
         if method not in method_map:
@@ -401,23 +286,8 @@ if __name__ == '__main__':
 
     results_dir = OUTPUT_DIR / 'results_filtered'
 
-    # Method 0: Single-scale RQA
     results_single = pipeline.run_batch(method='single_scale', filter_patients=True)
     pipeline.results_to_csv(results_single, results_dir / 'single_scale_rqa.csv')
 
-    # Method 1: SWT + Reconstruction -> RQA
     results_swt_recon = pipeline.run_batch(method='swt_recon', filter_patients=True)
     pipeline.results_to_csv(results_swt_recon, results_dir / 'multi_scale_swt_recon_rqa.csv')
-
-    # Method 2: SWT -> Direct RQA from coefficients
-    results_swt_direct = pipeline.run_batch(method='swt_direct', filter_patients=True)
-    pipeline.results_to_csv(results_swt_direct, results_dir / 'multi_scale_swt_direct_rqa.csv')
-
-    # Method 3: DWT + Reconstruction -> RQA
-    results_dwt_recon = pipeline.run_batch(method='dwt_recon', filter_patients=True)
-    pipeline.results_to_csv(results_dwt_recon, results_dir / 'multi_scale_dwt_recon_rqa.csv')
-
-    results_dwt_direct = pipeline.run_batch(method='dwt_direct', filter_patients=True)
-    pipeline.results_to_csv(results_dwt_direct, results_dir / 'multi_scale_dwt_direct_rqa.csv')
-
-    print("done")

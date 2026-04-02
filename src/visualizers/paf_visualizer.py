@@ -17,9 +17,9 @@ DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted
 HDF5_PATH  = DATA_DIR / 'paf_segments.h5'
 # HDF5_PATH  = DATA_DIR / 'paf_segments_with_quality_check.h5'
 
-SAMPLING_FREQ  = 128
+SAMPLING_FREQ  = 256
 SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "A4"]
-WAVELET        = 'db8'
+WAVELET        = 'db4'
 
 
 class PAFVisualizer:
@@ -672,45 +672,14 @@ class PAFVisualizer:
         epsilon_factor: float = 0.05,
         save_prefix: Optional[Path] = None,
     ):
-        """
-        Generate three separate plots for the same signal:
-        1. SWT decomposition + reconstruction -> RPs
-        2. SWT decomposition -> RPs from coefficients directly
-        3. DWT decomposition + reconstruction -> RPs
-
-        Args:
-            idx: Signal index
-            epsilon_method: Epsilon computation method
-            epsilon_factor: Epsilon factor
-            save_prefix: Path prefix for saving (will append _method1.png, _method2.png, _method3.png)
-        """
         signal, label, seg_id, pat_id = self.get_signal(idx)
         label_str, color = self._label_meta(label)
 
-        # Method 1: SWT + Reconstruction -> RP
-        print(f"Generating Method 1: SWT + Reconstruction -> RP...")
         self._plot_method_swt_reconstruction(
             signal, label_str, seg_id, pat_id, color,
             epsilon_method, epsilon_factor,
             save_prefix.parent / f"{save_prefix.name}_method1_swt_recon.png" if save_prefix else None
         )
-
-        # Method 2: SWT -> Direct RP from coefficients
-        print(f"Generating Method 2: SWT -> Direct RP from coefficients...")
-        self._plot_method_swt_direct(
-            signal, label_str, seg_id, pat_id, color,
-            epsilon_method, epsilon_factor,
-            save_prefix.parent / f"{save_prefix.name}_method2_swt_direct.png" if save_prefix else None
-        )
-
-        # Method 3: DWT + Reconstruction -> RP
-        print(f"Generating Method 3: DWT + Reconstruction -> RP...")
-        self._plot_method_dwt_reconstruction(
-            signal, label_str, seg_id, pat_id, color,
-            epsilon_method, epsilon_factor,
-            save_prefix.parent / f"{save_prefix.name}_method3_dwt_recon.png" if save_prefix else None
-        )
-
     def _plot_method_swt_reconstruction(
         self, signal, label_str, seg_id, pat_id, color,
         epsilon_method, epsilon_factor, save_path
@@ -756,94 +725,6 @@ class PAFVisualizer:
             print(f"  Saved: {save_path.name}")
         plt.close('all')
 
-    def _plot_method_swt_direct(
-        self, signal, label_str, seg_id, pat_id, color,
-        epsilon_method, epsilon_factor, save_path
-    ):
-        """Method 2: SWT decomposition -> Direct RP from coefficients"""
-        coeffs = self.decompose_signal_coeffs(signal)
-
-        fig, axes = plt.subplots(len(SUBBAND_NAMES), 2, figsize=(12, 3*len(SUBBAND_NAMES)))
-        fig.suptitle(f'Method 2: SWT -> Direct RP from Coefficients | {label_str} | {seg_id}', fontsize=14)
-
-        for i, name in enumerate(SUBBAND_NAMES):
-            coeff = coeffs[name]
-            params = self.subband_params[name]
-            tau, m = params['tau'], params['m']
-
-            if coeff is None:
-                axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
-                                ha='center', va='center', transform=axes[i, 0].transAxes)
-                axes[i, 0].set_ylabel(name)
-                axes[i, 1].axis('off')
-                continue
-
-            # Plot coefficients
-            axes[i, 0].plot(coeff, color=color, linewidth=0.5)
-            axes[i, 0].set_ylabel(f'{name} (coefficients)')
-            axes[i, 0].grid(True, alpha=0.3)
-
-            # Compute RP directly from coefficients
-            try:
-                rp, epsilon = self.compute_rp_from_coefficients(coeff, tau, m, epsilon_method, epsilon_factor)
-                rr = self._rr(rp)
-                axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
-                axes[i, 1].set_title(f'RR={rr:.4f}, eps={epsilon:.4f}')
-            except Exception as e:
-                axes[i, 1].text(0.5, 0.5, f'RP error\n{str(e)[:30]}',
-                               ha='center', va='center', transform=axes[i, 1].transAxes)
-
-        axes[-1, 0].set_xlabel('Sample index')
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path, dpi=150)
-            print(f"  Saved: {save_path.name}")
-        plt.close('all')
-
-    def _plot_method_dwt_reconstruction(
-        self, signal, label_str, seg_id, pat_id, color,
-        epsilon_method, epsilon_factor, save_path
-    ):
-        """Method 3: DWT decomposition + reconstruction -> RPs"""
-        subbands = self.decompose_signal_dwt(signal)
-
-        fig, axes = plt.subplots(len(SUBBAND_NAMES), 2, figsize=(12, 3*len(SUBBAND_NAMES)))
-        fig.suptitle(f'Method 3: DWT + Reconstruction -> RP | {label_str} | {seg_id}', fontsize=14)
-
-        for i, name in enumerate(SUBBAND_NAMES):
-            sub = subbands[name]
-            params = self.subband_params[name]
-            tau, m = params['tau'], params['m']
-
-            if sub is None:
-                axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
-                                ha='center', va='center', transform=axes[i, 0].transAxes)
-                axes[i, 0].set_ylabel(name)
-                axes[i, 1].axis('off')
-                continue
-
-            # Plot reconstructed subband
-            t_sub = np.arange(len(sub)) / SAMPLING_FREQ
-            axes[i, 0].plot(t_sub, sub, color=color, linewidth=0.5)
-            axes[i, 0].set_ylabel(f'{name} (reconstructed)')
-            axes[i, 0].grid(True, alpha=0.3)
-
-            # Compute and plot RP
-            try:
-                rp, epsilon = self.compute_rp(sub, tau, m, epsilon_method, epsilon_factor)
-                rr = self._rr(rp)
-                axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
-                axes[i, 1].set_title(f'RR={rr:.4f}, eps={epsilon:.4f}')
-            except Exception as e:
-                axes[i, 1].text(0.5, 0.5, f'RP error\n{str(e)[:30]}',
-                               ha='center', va='center', transform=axes[i, 1].transAxes)
-
-        axes[-1, 0].set_xlabel('Time (s)')
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path, dpi=150)
-            print(f"  Saved: {save_path.name}")
-        plt.close('all')
 if __name__ == '__main__':
     subband_params = {
         "original": {"tau": 12,  "m": 7},

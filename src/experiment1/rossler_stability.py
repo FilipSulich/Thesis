@@ -65,18 +65,27 @@ class StabilityTester:
 
         return mid
 
-
     def run_stability_analysis(self, system_type: str = 'rossler'):
         print(f"\n{'='*70}")
         print(f"STABILITY TEST: {self.n_trials} realisations — {system_type.upper()}")
         print(f"{'='*70}")
 
-        ref_signal   = self.viz._generate_rossler(seed=0)
+        ref_signal = []
+        if system_type == 'rossler':
+            ref_signal   = self.viz._generate_rossler(seed=0)
+        elif system_type == 'lorenz':
+            ref_signal = self.viz.generate_lorenz_system(seed=0)
+
         fixed_params = self._estimate_params_per_pipeline(ref_signal)
 
-        # Step 2: trial loop
         for trial in range(self.n_trials):
-            signal = self.viz._generate_rossler(seed=trial + 100)
+            signal = []
+            if system_type == 'rossler':
+                signal = self.viz._generate_rossler(seed=trial + 100)
+            elif system_type == 'lorenz':
+                signal = self.viz.generate_lorenz_system(seed=trial + 100)
+            else :
+                print("wrong syustem")
 
             for pipe in self.PIPELINES:
                 subbands = self.viz.decompose_signal(signal, pipe)
@@ -99,6 +108,8 @@ class StabilityTester:
 
                     normed  = (trimmed - trimmed.mean()) / std
 
+                    # Find epsilon for fixed RR=0.1 (binary search)
+                    # This ensures DET/LAM/TT differences reflect RP structure, not threshold
                     eps = self._find_epsilon(normed, tau, m, target_rr=0.1)
 
                     _, rqa = self.viz.compute_rp(normed, tau, m, eps)
@@ -117,22 +128,35 @@ class StabilityTester:
 
 
     def _estimate_params_per_pipeline(self, ref_signal: np.ndarray) -> dict:
+        """
+        Estimate tau and m from reference realization, separately per pipeline.
+
+        IMPORTANT: Applies same trimming as trial loop for consistency.
+        """
         fixed_params = {}
         for pipe in self.PIPELINES:
             fixed_params[pipe] = {}
             subbands = self.viz.decompose_signal(ref_signal, pipe)
             for band in self.BAND_NAMES:
-                signal  = subbands[band]
+                # Apply same trimming as trial loop
+                trimmed = self.viz._trim_signal(subbands[band])
 
-                std = signal.std()
+                # Check validity
+                if len(trimmed) < 10:
+                    print(f"  Warning: [{pipe}] {band} signal too short after trim, using default params")
+                    fixed_params[pipe][band] = {'tau': 1, 'm': 2}
+                    continue
+
+                std = trimmed.std()
                 if std < 1e-9:
                     print(f"  Warning: [{pipe}] {band} has zero variance, using default params")
                     fixed_params[pipe][band] = {'tau': 1, 'm': 2}
                     continue
 
-                normed  = (signal - signal.mean()) / std
+                normed  = (trimmed - trimmed.mean()) / std
                 tau, m  = self.viz.get_optimal_parameters(normed)
                 fixed_params[pipe][band] = {'tau': tau, 'm': m}
+                print(f"  [{pipe}] {band}: tau={tau}, m={m}")
 
         return fixed_params
 
@@ -170,82 +194,91 @@ class StabilityTester:
                 dwt_direct_vals = np.array(self.results['dwt_direct'][band][met])
                 dwt_vals = np.array(self.results['dwt_recon'][band][met])
 
-                if len(swt_vals) == 0 or len(dwt_vals) == 0 or len(swt_direct_vals) == 0 or len(dwt_direct_vals) == 0:
+                if len(swt_vals) == 0 or len(dwt_vals) == 0 or len(swt_direct_vals) == 0:
                     continue
 
-                swt_mean, swt_std = np.mean(swt_vals), np.std(swt_vals, ddof=1)
-                dwt_mean, dwt_std = np.mean(dwt_vals), np.std(dwt_vals, ddof=1)
-                swt_direct_mean, swt_direct_std = np.mean(swt_direct_vals), np.std(swt_direct_vals, ddof=1)
-                dwt_direct_mean, dwt_direct_std = np.mean(dwt_direct_vals), np.std(dwt_direct_vals, ddof=1)
+                # Robust statistics: Median ± IQR, MAD
+                def robust_stats(vals):
+                    median = np.median(vals)
+                    q1, q3 = np.percentile(vals, [25, 75])
+                    iqr = q3 - q1
+                    # MAD: Median Absolute Deviation (scaled by 1.4826 for consistency with std under normality)
+                    mad = 1.4826 * np.median(np.abs(vals - median))
+                    return median, iqr, mad
 
-                swt_cv = swt_std / swt_mean if swt_mean > 1e-9 else np.nan
-                dwt_cv = dwt_std / dwt_mean if dwt_mean > 1e-9 else np.nan
-                swt_direct_cv = swt_direct_std / swt_direct_mean if swt_direct_mean > 1e-9 else np.nan
-                dwt_direct_cv = dwt_direct_std / dwt_direct_mean if dwt_direct_mean > 1e-9 else np.nan
+                swt_med, swt_iqr, swt_mad = robust_stats(swt_vals)
+                dwt_med, dwt_iqr, dwt_mad = robust_stats(dwt_vals)
+                swt_direct_med, swt_direct_iqr, swt_direct_mad = robust_stats(swt_direct_vals)
+                dwt_direct_med, dwt_direct_iqr, dwt_direct_mad = robust_stats(dwt_direct_vals)
 
-                cv_ratio_dwt = dwt_cv / swt_cv if (swt_cv and swt_cv > 1e-9) else np.nan
-                cv_ratio_swt_direct = swt_direct_cv / swt_cv if (swt_cv and swt_cv > 1e-9) else np.nan
-                cv_ratio_dwt_direct = dwt_direct_cv / swt_cv if (swt_cv and swt_cv > 1e-9) else np.nan
+                # MAD ratios (robust variability measure, relative to swt_recon baseline)
+                mad_ratio_dwt = dwt_mad / swt_mad if swt_mad > 1e-9 else np.nan
+                mad_ratio_swt_direct = swt_direct_mad / swt_mad if swt_mad > 1e-9 else np.nan
+                mad_ratio_dwt_direct = dwt_direct_mad / swt_mad if swt_mad > 1e-9 else np.nan
 
-                # Levene test: equality of variance between all pipelines
-                lev_stat, lev_p = levene(swt_vals, dwt_vals, swt_direct_vals, dwt_direct_vals)
+                # Levene test: equality of variance
+                lev_stat, lev_p = levene(swt_vals, dwt_vals, swt_direct_vals)
 
-                # Absolute deviations from each pipeline's own mean
-                swt_devs = np.abs(swt_vals - swt_mean)
-                dwt_devs = np.abs(dwt_vals - dwt_mean)
-                swt_direct_devs = np.abs(swt_direct_vals - swt_direct_mean)
-                dwt_direct_devs = np.abs(dwt_direct_vals - dwt_direct_mean)
+                # Mann-Whitney U tests with probability of superiority
+                # P(X > Y) = U / (n1 * n2): prob that random value from group 1 > random value from group 2
+                def prob_superiority(u_stat, n1, n2):
+                    return u_stat / (n1 * n2)
 
-                # Pairwise Mann-Whitney U tests (swt_recon vs others)
-                u_dwt, p_dwt = mannwhitneyu(swt_devs, dwt_devs, alternative='two-sided')
-                u_swt_direct, p_swt_direct = mannwhitneyu(swt_devs, swt_direct_devs, alternative='two-sided')
-                u_dwt_direct, p_dwt_direct = mannwhitneyu(swt_devs, dwt_direct_devs, alternative='two-sided')
+                u_dwt, p_dwt = mannwhitneyu(swt_vals, dwt_vals, alternative='two-sided')
+                ps_dwt = prob_superiority(u_dwt, len(swt_vals), len(dwt_vals))
 
-                # Cohen's d on absolute deviations (vs swt_recon)
-                def cohens_d_calc(dev1, dev2):
-                    pooled = np.sqrt(
-                        ((len(dev1)-1) * dev1.var(ddof=1) +
-                         (len(dev2)-1) * dev2.var(ddof=1)) /
-                        (len(dev1) + len(dev2) - 2)
-                    )
-                    return ((dev1.mean() - dev2.mean()) / pooled
-                            if pooled > 1e-9 else np.nan)
+                u_swt_direct, p_swt_direct = mannwhitneyu(swt_vals, swt_direct_vals, alternative='two-sided')
+                ps_swt_direct = prob_superiority(u_swt_direct, len(swt_vals), len(swt_direct_vals))
 
-                d_dwt = cohens_d_calc(swt_devs, dwt_devs)
-                d_swt_direct = cohens_d_calc(swt_devs, swt_direct_devs)
-                d_dwt_direct = cohens_d_calc(swt_devs, dwt_direct_devs)
+                u_dwt_direct, p_dwt_direct = mannwhitneyu(swt_vals, dwt_direct_vals, alternative='two-sided')
+                ps_dwt_direct = prob_superiority(u_dwt_direct, len(swt_vals), len(dwt_direct_vals))
+
+                # Absolute deviations from median (for plotting)
+                swt_devs = np.abs(swt_vals - swt_med)
+                dwt_devs = np.abs(dwt_vals - dwt_med)
+                swt_direct_devs = np.abs(swt_direct_vals - swt_direct_med)
+                dwt_direct_devs = np.abs(dwt_direct_vals - dwt_direct_med)
 
                 rows.append({
                     'band':       band,
                     'metric':     met,
-                    'swt_mean':   swt_mean,
-                    'dwt_mean':   dwt_mean,
-                    'swt_direct_mean': swt_direct_mean,
-                    'dwt_direct_mean': dwt_direct_mean,
-                    'swt_cv':     swt_cv,
-                    'dwt_cv':     dwt_cv,
-                    'swt_direct_cv': swt_direct_cv,
-                    'dwt_direct_cv': dwt_direct_cv,
-                    'cv_ratio_dwt': cv_ratio_dwt,
-                    'cv_ratio_swt_direct': cv_ratio_swt_direct,
-                    'cv_ratio_dwt_direct': cv_ratio_dwt_direct,
-                    'levene_stat':lev_stat,
-                    'levene_p':   lev_p,
-                    'u_dwt':      u_dwt,
-                    'p_dwt':      p_dwt,
-                    'u_swt_direct': u_swt_direct,
-                    'p_swt_direct': p_swt_direct,
-                    'u_dwt_direct': u_dwt_direct,
-                    'p_dwt_direct': p_dwt_direct,
-                    'd_dwt':      d_dwt,
-                    'd_swt_direct': d_swt_direct,
-                    'd_dwt_direct': d_dwt_direct,
-                    '_swt_devs':  swt_devs,
-                    '_dwt_devs':  dwt_devs,
+                    # Robust statistics
+                    'swt_median': swt_med,
+                    'swt_iqr':    swt_iqr,
+                    'swt_mad':    swt_mad,
+                    'dwt_median': dwt_med,
+                    'dwt_iqr':    dwt_iqr,
+                    'dwt_mad':    dwt_mad,
+                    'swt_direct_median': swt_direct_med,
+                    'swt_direct_iqr':    swt_direct_iqr,
+                    'swt_direct_mad':    swt_direct_mad,
+                    'dwt_direct_median': dwt_direct_med,
+                    'dwt_direct_iqr':    dwt_direct_iqr,
+                    'dwt_direct_mad':    dwt_direct_mad,
+                    # MAD ratios (robust variability measure)
+                    'mad_ratio_dwt':        mad_ratio_dwt,
+                    'mad_ratio_swt_direct': mad_ratio_swt_direct,
+                    'mad_ratio_dwt_direct': mad_ratio_dwt_direct,
+                    # Levene test
+                    'levene_stat': lev_stat,
+                    'levene_p':    lev_p,
+                    # Mann-Whitney U with probability of superiority
+                    'u_dwt':           u_dwt,
+                    'p_dwt':           p_dwt,
+                    'ps_dwt':          ps_dwt,
+                    'u_swt_direct':    u_swt_direct,
+                    'p_swt_direct':    p_swt_direct,
+                    'ps_swt_direct':   ps_swt_direct,
+                    'u_dwt_direct':    u_dwt_direct,
+                    'p_dwt_direct':    p_dwt_direct,
+                    'ps_dwt_direct':   ps_dwt_direct,
+                    # Arrays for plotting
+                    '_swt_devs':        swt_devs,
+                    '_dwt_devs':        dwt_devs,
                     '_swt_direct_devs': swt_direct_devs,
                     '_dwt_direct_devs': dwt_direct_devs,
-                    '_swt_vals':  swt_vals,
-                    '_dwt_vals':  dwt_vals,
+                    '_swt_vals':        swt_vals,
+                    '_dwt_vals':        dwt_vals,
                     '_swt_direct_vals': swt_direct_vals,
                     '_dwt_direct_vals': dwt_direct_vals,
                 })
@@ -275,6 +308,7 @@ class StabilityTester:
         self._plot_raw_violins(df)
         self._plot_deviation_violins(df)
         self._plot_cv_bars(df)
+        self._plot_probability_superiority_heatmap(df)
 
     def _plot_raw_violins(self, df: pd.DataFrame):
         plot_bands = ['D1', 'D2', 'D3', 'D4']
@@ -390,7 +424,7 @@ class StabilityTester:
 
     def _plot_cv_bars(self, df: pd.DataFrame):
         """
-        CV per band per metric, grouped bars for all 4 pipelines.
+        MAD (Median Absolute Deviation) per band per metric, grouped bars for all 4 pipelines.
         Holm-corrected significance stars from Levene test.
         """
         plot_bands   = ['D1', 'D2', 'D3', 'D4']
@@ -399,8 +433,8 @@ class StabilityTester:
 
         fig, axes = plt.subplots(1, n_metrics, figsize=(18, 6), sharey=False)
         fig.suptitle(
-            "Coefficient of variation (CV = std/mean) across Rössler realisations (All Pipelines)\n"
-            "Lower CV = more consistent RQA estimates across different signal phases.",
+            "MAD (Median Absolute Deviation) across Rössler realisations (All Pipelines)\n"
+            "Lower MAD = more consistent RQA estimates across different signal phases.",
             fontsize=12, fontweight='bold'
         )
 
@@ -412,43 +446,115 @@ class StabilityTester:
                                  else '*' if p < 0.05 else ''
 
         for ax, met in zip(axes, self.METRICS):
-            cvs = [[], [], [], []]  # One list for each pipeline
+            mads = [[], [], [], []]  # One list for each pipeline
             sigs = []
 
             for band in plot_bands:
                 row = df[(df['band'] == band) & (df['metric'] == met)]
                 if row.empty:
-                    for cv_list in cvs:
-                        cv_list.append(0)
+                    for mad_list in mads:
+                        mad_list.append(0)
                     sigs.append('')
                     continue
                 r = row.iloc[0]
-                cvs[0].append(r['swt_cv'])
-                cvs[1].append(r['dwt_cv'])
-                cvs[2].append(r['swt_direct_cv'])
-                cvs[3].append(r['dwt_direct_cv'])
+                mads[0].append(r['swt_mad'])
+                mads[1].append(r['dwt_mad'])
+                mads[2].append(r['swt_direct_mad'])
+                mads[3].append(r['dwt_direct_mad'])
                 sigs.append(sig_map(r['levene_p'], r['significant_holm']))
 
             # Plot bars for each pipeline
-            for i, (cv_list, color, label) in enumerate(zip(cvs, colors, pipeline_labels)):
+            for i, (mad_list, color, label) in enumerate(zip(mads, colors, pipeline_labels)):
                 offset = (i - 1.5) * width
-                ax.bar(x + offset, cv_list, width,
+                ax.bar(x + offset, mad_list, width,
                        label=label, color=color,
                        alpha=0.85, edgecolor='white')
 
             ax.set_xticks(x)
             ax.set_xticklabels(plot_bands)
             ax.set_title(self.METRIC_LABELS[met], fontweight='bold')
-            ax.set_ylabel('CV (std / mean)')
+            ax.set_ylabel('MAD (scaled)')
             ax.legend(fontsize=9)
             ax.grid(axis='y', alpha=0.3)
 
         plt.tight_layout()
-        path = os.path.join(self.output_dir, 'stability_cv_bars.png')
+        path = os.path.join(self.output_dir, 'stability_mad_bars.png')
         plt.savefig(path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"Saved: {path}")
+
+    def _plot_probability_superiority_heatmap(self, df: pd.DataFrame):
+        """
+        Heatmap of probability of superiority across (band × metric) pairs.
+        P(X > Y) from Mann-Whitney U: interpretable effect size.
+        Shows where pipelines differ in magnitude.
+        """
+        plot_bands = ['D1', 'D2', 'D3', 'D4']
+        n_bands = len(plot_bands)
+        n_metrics = len(self.METRICS)
+
+        # Create 3 subplots for 3 comparisons (DWT-R, SWT-D, DWT-D vs SWT-R)
+        fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+        fig.suptitle(
+            "Probability of Superiority: P(SWT-R > Other) from Mann-Whitney U\n"
+            "Values > 0.5 indicate SWT-R tends to have higher values; < 0.5 indicates lower values.",
+            fontsize=12, fontweight='bold'
+        )
+
+        comparisons = [
+            ('ps_dwt', 'DWT-R vs SWT-R'),
+            ('ps_swt_direct', 'SWT-D vs SWT-R'),
+            ('ps_dwt_direct', 'DWT-D vs SWT-R')
+        ]
+
+        for ax, (ps_col, title) in zip(axes, comparisons):
+            # Build matrix: rows = bands, cols = metrics
+            matrix = np.zeros((n_bands, n_metrics))
+
+            for i, band in enumerate(plot_bands):
+                for j, met in enumerate(self.METRICS):
+                    row = df[(df['band'] == band) & (df['metric'] == met)]
+                    if not row.empty:
+                        matrix[i, j] = row.iloc[0][ps_col]
+                    else:
+                        matrix[i, j] = np.nan
+
+            # Plot heatmap
+            im = ax.imshow(matrix, cmap='RdBu_r', vmin=0, vmax=1, aspect='auto')
+
+            # Add text annotations
+            for i in range(n_bands):
+                for j in range(n_metrics):
+                    val = matrix[i, j]
+                    if not np.isnan(val):
+                        text_color = 'white' if (val < 0.3 or val > 0.7) else 'black'
+                        ax.text(j, i, f'{val:.2f}', ha='center', va='center',
+                               color=text_color, fontsize=10, fontweight='bold')
+
+            ax.set_xticks(np.arange(n_metrics))
+            ax.set_yticks(np.arange(n_bands))
+            ax.set_xticklabels([self.METRIC_LABELS[m] for m in self.METRICS])
+            ax.set_yticklabels(plot_bands)
+            ax.set_title(title, fontweight='bold')
+            ax.set_xlabel('RQA Metric')
+            ax.set_ylabel('Subband')
+
+            # Add colorbar
+            cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label('P(SWT-R > Other)', rotation=270, labelpad=20)
+
+        plt.tight_layout()
+        path = os.path.join(self.output_dir, 'stability_prob_superiority_heatmap.png')
+        plt.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"Saved: {path}")
+
 if __name__ == '__main__':
-    viz = DecompositionVisualizer()
-    stab = StabilityTester(viz, n_trials=50)
-    stab.run_stability_analysis()
+    system = 'lorenz'
+    # system = 'rossler'
+
+    viz = DecompositionVisualizer(seed=42)
+
+    # Run stability test
+    stab = StabilityTester(viz, n_trials=20, output_dir=f'{system}_stability_output')
+    stab.run_stability_analysis(system_type=system)
