@@ -35,6 +35,71 @@ class SubbandPlotter:
         plt.show()
         print(f"Saved: {os.path.join(self.output_dir, 'leakage_matrices.png')}")
 
+    def visualize_aggregated_structural_metrics_violin(self, master_df):
+        """
+        Plots the distribution of Hamming Distance and RP Pattern Correlation
+        across all subbands using the identical 'pro' violin formatting.
+        """
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        # Configuration matching your other "pro" plots
+        pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
+        colors = ['#2ecc71', '#3498db', '#e74c3c', '#34495e']
+        labels = {'swt_recon': 'SWT-R', 'swt_direct': 'SWT-D', 'dwt_recon': 'DWT-R', 'dwt_direct': 'DWT-D'}
+
+        metrics = ['hamming_distance', 'rp_pattern_corr']
+        metrics_mapping = {
+            'hamming_distance': 'Normalized Hamming Distance',
+            'rp_pattern_corr': 'RP Pattern Correlation'
+        }
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+
+        for idx, metric in enumerate(metrics):
+            ax = axes[idx]
+
+            # Extract data for plotting into list of arrays (standard plt format)
+            plot_data = [master_df[master_df['pipeline'] == p][metric].dropna().values for p in pipelines]
+
+            # Create violin plot using matplotlib for manual part control
+            parts = ax.violinplot(plot_data, positions=range(len(pipelines)),
+                                  showmeans=True, showmedians=True, widths=0.6)
+
+            # Manual styling of the violin bodies to match your 'pro' style
+            for i, pc in enumerate(parts['bodies']):
+                pc.set_facecolor(colors[i])
+                pc.set_alpha(0.6)
+                pc.set_edgecolor('black')
+                pc.set_linewidth(1.2)
+
+            # Styling the indicator lines
+            parts['cmedians'].set_edgecolor('#2c3e50')
+            parts['cmedians'].set_linewidth(2)
+            parts['cmeans'].set_edgecolor('red')
+            parts['cmeans'].set_linewidth(2)
+
+            # Ensure the remaining lines (max/min/bar) are consistent
+            for line in ['cmins', 'cmaxes', 'cbars']:
+                parts[line].set_edgecolor('#2c3e50')
+                parts[line].set_linewidth(1)
+
+            # Axes formatting
+            ax.set_xticks(range(len(pipelines)))
+            ax.set_xticklabels([labels[p] for p in pipelines])
+            ax.set_title(f'{metrics_mapping[metric]} Distribution by Pipeline', fontweight='bold', pad=15)
+            ax.set_ylabel(f'{metrics_mapping[metric]}')
+
+            # Clean aesthetics
+            sns.despine(ax=ax)
+            ax.grid(axis='y', alpha=0.3)
+
+        plt.tight_layout()
+        filename = os.path.join(self.output_dir, 'aggregated_structural_violin.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.show()
+        print(f"Saved: {filename}")
+
     def visualize_absolute_metrics(self, master_df):
         import matplotlib.pyplot as plt
 

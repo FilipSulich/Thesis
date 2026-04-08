@@ -25,20 +25,89 @@ class SineNoiseBenchmark:
     }
     BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
 
+    STYLE_CONFIG = {
+        'colors': {'swt_recon': '#2ecc71', 'swt_direct': '#3498db', 'dwt_recon': '#e74c3c'},
+        'labels': {'swt_recon': 'SWT-R', 'swt_direct': 'SWT-D', 'dwt_recon': 'DWT-R'},
+        'median_color': '#2c3e50',
+        'mean_color': 'red',
+        'ref_color': '#34495e',
+        'grid_alpha': 0.3
+    }
     def __init__(self, n_trials: int = 100, fs: int = 128, n_samples: int = 1280):
-        self.M  = n_trials
+        self.M = n_trials
         self.FS = fs
-        self.N  = n_samples
+        self.N = n_samples
         self.SNR_LEVELS = [20, 10, 5, 0]
-        self.PIPELINES  = ['swt_recon', 'swt_direct', 'dwt_recon']
-
+        self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon']
         self.OUTPUT_DIR = '../../outputs/sine_noise_benchmark'
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
-
         self._results: list[dict] = []
         self.calculator = SubbandCalculator(is_sine=True)
-
         self._reference: dict = {}
+
+    # def plot_violinplots(self):
+    #     """
+    #     Replaces boxplots with 'pro' styled violin plots.
+    #     Shows full distribution, median (dark blue), and mean (red).
+    #     """
+    #     metrics = [
+    #         ('delta_det', 'ΔDET', 'lower'), ('delta_lam', 'ΔLAM', 'lower'),
+    #         ('delta_tt', 'ΔTT', 'lower'), ('hamming', 'Hamming Distance', 'lower'),
+    #         ('pearson', 'RP Correlation', 'higher'), ('snr_sub', 'Subband SNR', 'higher')
+    #     ]
+    #
+    #     sns.set_theme(style="whitegrid", font_scale=1.1)
+    #
+    #     for metric, label, better in metrics:
+    #         fig, axes = plt.subplots(1, len(self.SNR_LEVELS), figsize=(20, 6), sharey=True)
+    #
+    #         for j, snr in enumerate(self.SNR_LEVELS):
+    #             ax = axes[j]
+    #             snr_data = self.df[self.df['snr_in'] == snr]
+    #
+    #             # Format data for matplotlib's violinplot
+    #             plot_data = [snr_data[snr_data['pipeline'] == p][metric].dropna().values for p in self.PIPELINES]
+    #
+    #             # Create the violin parts
+    #             parts = ax.violinplot(plot_data, positions=range(len(self.PIPELINES)),
+    #                                   showmeans=True, showmedians=True, widths=0.7)
+    #
+    #             # Manual styling of violin bodies (the 'pro' look)
+    #             for i, pc in enumerate(parts['bodies']):
+    #                 pc.set_facecolor(self.STYLE_CONFIG['colors'][self.PIPELINES[i]])
+    #                 pc.set_alpha(0.65)
+    #                 pc.set_edgecolor('black')
+    #                 pc.set_linewidth(1.2)
+    #
+    #             # Style indicator lines to match the previous successful plots
+    #             parts['cmedians'].set_edgecolor(self.STYLE_CONFIG['median_color'])
+    #             parts['cmedians'].set_linewidth(2.5)
+    #             parts['cmeans'].set_edgecolor(self.STYLE_CONFIG['mean_color'])
+    #             parts['cmeans'].set_linewidth(2)
+    #
+    #             # Clean up the min/max/bar lines
+    #             for line in ['cmins', 'cmaxes', 'cbars']:
+    #                 parts[line].set_edgecolor('#2c3e50')
+    #                 parts[line].set_linewidth(1)
+    #
+    #             ax.set_title(f"Input SNR: {snr} dB", fontweight='bold')
+    #             ax.set_xticks(range(len(self.PIPELINES)))
+    #             ax.set_xticklabels([self.STYLE_CONFIG['labels'][p] for p in self.PIPELINES])
+    #             ax.grid(axis='y', alpha=self.STYLE_CONFIG['grid_alpha'])
+    #
+    #             if j == 0:
+    #                 ax.set_ylabel(label, fontweight='bold', fontsize=12)
+    #
+    #             sns.despine(ax=ax, trim=True)
+    #
+    #         fig.suptitle(f"{label} Distribution Across Pipelines [{better} is better]",
+    #                      fontsize=16, fontweight='bold', y=1.02)
+    #
+    #         plt.tight_layout()
+    #         out = os.path.join(self.OUTPUT_DIR, f'violin_pro_{metric}.png')
+    #         plt.savefig(out, dpi=300, bbox_inches='tight')
+    #         plt.close()
+    #         print(f"Saved pro violin plot: {out}")
 
     def _build_clean_references(self):
         t = np.arange(self.N) / self.FS
@@ -235,8 +304,9 @@ class SineNoiseBenchmark:
         print(f"\nResults saved to {csv_path}")
 
         self._statistical_comparison()
+        self.plot_violinplots()
         self.plot_degradation_curves()
-        self.plot_boxplots()
+        self.plot_violinplots()
         self.plot_trial_psd(snr_target=10)
 
     def _statistical_comparison(self):
@@ -307,88 +377,135 @@ class SineNoiseBenchmark:
             pairs[i]['significant_holm'] = pairs[i]['p_value'] < pairs[i]['alpha_holm']
         return pairs
 
-    def plot_degradation_curves(self):
-        sns.set_style("whitegrid")
-
-        # List of metrics to plot and their corresponding Y-axis labels
-        metrics_to_plot = [
-            ('delta_det', 'Average ΔDET'),
-            ('delta_lam', 'Average ΔLAM'),
-            ('delta_tt', 'Average ΔTT'),
-            ('hamming', 'Average Hamming distance'),
-            ('pearson', 'Average Pearson RP correlation'),
+    def plot_violinplots(self):
+        """
+        Replaces all boxplots with 'pro' styled violin plots.
+        Covers RQA deviations, RP similarity, and PSD metrics.
+        """
+        metrics = [
+            ('delta_det', 'ΔDET', 'lower'), ('delta_lam', 'ΔLAM', 'lower'),
+            ('delta_tt', 'ΔTT', 'lower'), ('hamming', 'Hamming Distance', 'lower'),
+            ('frobenius', 'Frobenius Distance', 'lower'), ('pearson', 'RP Correlation', 'higher'),
+            ('snr_sub', 'Subband SNR (dB)', 'higher'), ('inf', 'Noise Fraction', 'lower'),
+            ('flatness', 'Noise Flatness', 'higher')
         ]
 
-        # Aggregate metrics: Calculate the mean across all bands for each trial and pipeline
+        sns.set_theme(style="whitegrid", font_scale=1.1)
+
+        for metric, label, better in metrics:
+            fig, axes = plt.subplots(1, len(self.SNR_LEVELS), figsize=(20, 6), sharey=False)
+
+            for j, snr in enumerate(self.SNR_LEVELS):
+                ax = axes[j]
+                snr_data = self.df[self.df['snr_in'] == snr]
+
+                plot_data = [snr_data[snr_data['pipeline'] == p][metric].dropna().values for p in self.PIPELINES]
+
+                parts = ax.violinplot(plot_data, positions=range(len(self.PIPELINES)),
+                                      showmeans=True, showmedians=True, widths=0.7)
+
+                for i, pc in enumerate(parts['bodies']):
+                    pc.set_facecolor(self.STYLE_CONFIG['colors'][self.PIPELINES[i]])
+                    pc.set_alpha(0.65)
+                    pc.set_edgecolor('black')
+                    pc.set_linewidth(1.2)
+
+                parts['cmedians'].set_edgecolor(self.STYLE_CONFIG['median_color'])
+                parts['cmedians'].set_linewidth(2.5)
+                parts['cmeans'].set_edgecolor(self.STYLE_CONFIG['mean_color'])
+                parts['cmeans'].set_linewidth(2)
+
+                for line in ['cmins', 'cmaxes', 'cbars']:
+                    parts[line].set_edgecolor(self.STYLE_CONFIG['median_color'])
+                    parts[line].set_linewidth(1)
+
+                ax.set_title(f"Input SNR: {snr} dB", fontweight='bold')
+                ax.set_xticks(range(len(self.PIPELINES)))
+                ax.set_xticklabels([self.STYLE_CONFIG['labels'][p] for p in self.PIPELINES])
+                ax.grid(axis='y', alpha=self.STYLE_CONFIG['grid_alpha'])
+
+                if j == 0:
+                    ax.set_ylabel(label, fontweight='bold', fontsize=12)
+
+                sns.despine(ax=ax, trim=True)
+
+            fig.suptitle(f"{label} Distribution [{better} is better]",
+                         fontsize=16, fontweight='bold', y=1.02)
+
+            plt.tight_layout()
+            out = os.path.join(self.OUTPUT_DIR, f'violin_pro_{metric}.png')
+            plt.savefig(out, dpi=300, bbox_inches='tight')
+            plt.close()
+
+    def plot_degradation_curves(self):
+        """
+        Generates standardized 'pro' line plots for all metrics.
+        Ensures consistent sizing, padding, and axis behavior.
+        """
+        sns.set_theme(style="whitegrid", font_scale=1.1)
+
+        # Mapping metrics to their display labels and "better" direction
+        metrics_to_plot = [
+            ('delta_det', 'Avg. Determinism Deviation', 'lower'),
+            ('delta_lam', 'Avg. Laminarity Deviation', 'lower'),
+            ('delta_tt', 'Avg. Trapping Time Deviation', 'lower'),
+            ('hamming', 'Avg. Hamming Distance', 'lower'),
+            ('pearson', 'Avg. RP Correlation', 'higher'),
+        ]
+
         metric_cols = [m[0] for m in metrics_to_plot]
+        # Aggregate across trials to get mean and std per SNR level
         agg_df = self.df.groupby(['snr_in', 'trial', 'pipeline'])[metric_cols].mean().reset_index()
 
-        for metric, ylabel in metrics_to_plot:
-            # Create a single plot for the averaged metric
-            plt.figure(figsize=(10, 6))
+        for metric, label, better in metrics_to_plot:
+            # 1. Standardized Figure Creation
+            fig, ax = plt.subplots(figsize=(9, 6))
 
-            ax = sns.lineplot(
-                data=agg_df,
-                x='snr_in',
-                y=metric,
-                hue='pipeline',
-                marker='o',
-                errorbar=('ci', 95),
-                palette='colorblind'
-            )
+            # 2. Consistent Pipeline Plotting
+            for pipe in self.PIPELINES:
+                pipe_data = agg_df[agg_df['pipeline'] == pipe]
+                stats = pipe_data.groupby('snr_in')[metric].agg(['mean', 'std']).reset_index()
 
-            # Formatting to match your original style
-            plt.title(
-                f"{ylabel} degradation vs SNR\n"
-                f"(Mean across all bands: {', '.join(self.BAND_NAMES)})",
-                fontsize=13,
-                fontweight='bold'
-            )
+                # Sort by SNR for clean line plotting (important if data is shuffled)
+                stats = stats.sort_values('snr_in')
 
-            ax.invert_xaxis()  # Keep high SNR on the left
-            plt.xlabel("Input SNR (dB)")
-            plt.ylabel(ylabel)
-            plt.legend(title='Pipeline', frameon=True)
-            plt.grid(alpha=0.3)
+                color = self.STYLE_CONFIG['colors'][pipe]
+                label_name = self.STYLE_CONFIG['labels'][pipe]
 
+                ax.plot(stats['snr_in'], stats['mean'],
+                        marker='o', markersize=7, linewidth=2.5,
+                        color=color, label=label_name, zorder=3)
+
+                ax.fill_between(stats['snr_in'],
+                                stats['mean'] - stats['std'],
+                                stats['mean'] + stats['std'],
+                                color=color, alpha=0.15, zorder=2)
+
+            # 3. Standardized Formatting
+            ax.set_title(f"{label} Degradation\n({better} is better)",
+                         fontweight='bold', fontsize=14, pad=20)
+            ax.set_xlabel("Input SNR (dB)", fontweight='bold', labelpad=10)
+            ax.set_ylabel(label, fontweight='bold', labelpad=10)
+
+            # Ensure the X-axis is inverted (High SNR -> Low SNR) consistently
+            ax.set_xlim(max(self.SNR_LEVELS) + 2, min(self.SNR_LEVELS) - 2)
+            ax.set_xticks(self.SNR_LEVELS)
+
+            # Style the legend
+            ax.legend(frameon=True, facecolor='white', framealpha=0.9,
+                      edgecolor='#d1d1d1', fontsize=10, loc='best')
+
+            # Grid and Spines
+            ax.grid(True, linestyle='--', alpha=self.STYLE_CONFIG['grid_alpha'])
+            sns.despine(trim=True)
+
+            # 4. Save with consistent DPI and bounding box
             plt.tight_layout()
-            out = os.path.join(self.OUTPUT_DIR, f'curve_avg_{metric}.png')
-            plt.savefig(out, dpi=150, bbox_inches='tight')
+            out_path = os.path.join(self.OUTPUT_DIR, f'curve_pro_{metric}.png')
+            plt.savefig(out_path, dpi=300, bbox_inches='tight')
             plt.close()
-            print(f"Saved aggregated curve: {out}")
 
-    def plot_boxplots(self):
-        metrics = [
-            ('delta_det', 'ΔDET',                  'lower'),
-            ('delta_lam', 'ΔLAM',                  'lower'),
-            ('delta_tt',  'ΔTT',                   'lower'),
-            ('hamming',   'Hamming distance',       'lower'),
-            ('frobenius', 'Frobenius distance',     'lower'),
-            ('pearson',   'Pearson RP correlation', 'higher'),
-            ('snr_sub',   'In-band SNR (dB)',       'higher'),
-            ('inf',       'In-band noise fraction', 'lower'),
-            ('flatness',  'Noise-floor flatness',   'higher'),
-        ]
-        for metric, label, better in metrics:
-            fig, axes = plt.subplots(1, len(self.SNR_LEVELS), figsize=(18, 5), sharey=True)
-            for j, snr in enumerate(self.SNR_LEVELS):
-                ax   = axes[j]
-                data = self.df[self.df['snr_in'] == snr]
-                sns.boxplot(data=data, x='pipeline', y=metric, ax=ax,
-                            palette='colorblind', order=self.PIPELINES)
-                ax.set_title(f"SNR = {snr} dB")
-                ax.set_xticklabels(ax.get_xticklabels(),
-                                   rotation=30, ha='right', fontsize=8)
-                ax.set_ylabel(label if j == 0 else "")
-                ax.grid(axis='y', alpha=0.3)
-
-            fig.suptitle(f"{label}  [{better} is better]",
-                         fontsize=13, fontweight='bold')
-            plt.tight_layout()
-            out = os.path.join(self.OUTPUT_DIR, f'box_{metric}.png')
-            plt.savefig(out, dpi=150, bbox_inches='tight')
-            plt.close()
-            print(f"Saved: {out}")
+            print(f"Saved standardized degradation curve: {out_path}")
 
     def plot_trial_psd(self, snr_target: int = 10):
         np.random.seed(0)
@@ -450,6 +567,6 @@ class SineNoiseBenchmark:
 if __name__ == '__main__':
     bench = SineNoiseBenchmark(n_trials=50, fs=128, n_samples=1280)
     bench.run_experiment()
-    bench.plot_trial_psd(snr_target=20)
+    # bench.plot_trial_psd(snr_target=20)
     # bench.plot_trial_psd(snr_target=10)
     # bench.plot_trial_psd(snr_target=0)

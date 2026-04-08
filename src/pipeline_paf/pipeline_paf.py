@@ -9,6 +9,12 @@ from tqdm import tqdm
 
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+
+from src.recurrence_plot.AMI import AMI
+from src.recurrence_plot.FNN import FNN
+from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,66 +22,40 @@ import src.wavelets.stationary_wavelet_transform as stationary_wavelet
 import src.recurrence_plot.recurrence_plot_generation as recurrence_plot
 from src.data_cleaning.data_cleaner import DataCleaner
 
-OUTPUT_DIR    = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted/paf_updated')
-HDF5_PATH     = OUTPUT_DIR / 'paf_segments_all_clean_new_cleaning_with_lowpass.h5'
+OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new/exp2')
+HDF5_PATH = OUTPUT_DIR / 'paf_with_quality.h5'
 
+SAMPLING_FREQ = 128
+WAVELET = 'db4'
+SWT_LEVEL = 4
 
-SAMPLING_FREQ = 256
-WAVELET       = 'db4'
-SWT_LEVEL     = 4
-
-ALL_SUBBANDS     = ['D1', 'D2', 'D3', 'D4', 'A4']
 ANALYSIS_SUBBANDS = ['D1', 'D2', 'D3', 'D4', 'A4']
 
-DEFAULT_SINGLE_SCALE_PARAMS = {'tau': 12, 'm': 7}
-
-DEFAULT_SUBBAND_PARAMS = {
-    'D1': {'tau': 1,  'm': 4},
-    'D2': {'tau': 2,  'm': 4},
-    'D3': {'tau': 3,  'm': 4},
-    'D4': {'tau': 6,  'm': 5},
-    'A4': {'tau': 20, 'm': 8},
-}
 DEFAULT_EPSILON_PERCENTILE = 5.0
-epsilon_distance = 0.05
-
-def _extract_rqa_metrics(rqa_result) -> Dict[str, float]:
-    return {
-        "recurrence_rate":        rqa_result.recurrence_rate,
-        "determinism":            rqa_result.determinism,
-        "average_diagonal_line":  rqa_result.average_diagonal_line,
-        "longest_diagonal_line":  rqa_result.longest_diagonal_line,
-        "divergence":             rqa_result.divergence,
-        "entropy_diagonal_lines": rqa_result.entropy_diagonal_lines,
-        "laminarity":             rqa_result.laminarity,
-        "trapping_time":          rqa_result.trapping_time,
-        "longest_vertical_line":  rqa_result.longest_vertical_line,
-        "entropy_vertical_lines": rqa_result.entropy_vertical_lines,
-    }
 
 
 @dataclass
 class RQAWithEpsilon:
-    rqa:     Any
+    rqa: Any
     epsilon: float
 
 
 @dataclass
 class PAFResult:
-    segment_id:   str
-    patient_id:   str
-    label:        int
+    segment_id: str
+    patient_id: str
+    label: int
     single_scale: bool
-    method:       str  # 'single_scale', 'swt_recon', 'swt_direct', 'dwt_recon'
-    rqa_results:  Dict[str, RQAWithEpsilon] = field(default_factory=dict)
+    method: str
+    rqa_results: Dict[str, RQAWithEpsilon] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         row = {
-            "segment_id":   self.segment_id,
-            "patient_id":   self.patient_id,
-            "label":        self.label,
+            "segment_id": self.segment_id,
+            "patient_id": self.patient_id,
+            "label": self.label,
             "single_scale": self.single_scale,
-            "method":       self.method,
+            "method": self.method,
         }
         for key, result in self.rqa_results.items():
             row[f"{key}_epsilon"] = result.epsilon
@@ -83,211 +63,201 @@ class PAFResult:
                 row[f"{key}_{metric_name}"] = value
         return row
 
+
+def _extract_rqa_metrics(rqa_result) -> Dict[str, float]:
+    return {
+        "recurrence_rate": rqa_result.recurrence_rate,
+        "determinism": rqa_result.determinism,
+        "longest_diagonal_line": rqa_result.longest_diagonal_line,
+        "divergence": rqa_result.divergence,
+        "laminarity": rqa_result.laminarity,
+        "trapping_time": rqa_result.trapping_time,
+    }
+
+
 class PAFPipeline:
-    def __init__(
-        self,
-        subband_params: Dict[str, Dict[str, Any]] = None,
-        single_scale_params: Dict[str, Any] = None,
-        epsilon_percentile: float = DEFAULT_EPSILON_PERCENTILE,
-    ):
-        self.subband_params      = subband_params or DEFAULT_SUBBAND_PARAMS
-        self.single_scale_params = single_scale_params or DEFAULT_SINGLE_SCALE_PARAMS
-        self.epsilon_percentile  = epsilon_percentile
-        self.cleaner             = DataCleaner(fs=SAMPLING_FREQ)
+    def __init__(self, epsilon_percentile: float = DEFAULT_EPSILON_PERCENTILE):
+        self.epsilon_percentile = epsilon_percentile
+        self.cleaner = DataCleaner(fs=SAMPLING_FREQ)
 
-    def load_data(self, filter_patients: bool = True) -> Tuple[np.ndarray, np.ndarray, List[str], List[str]]:
+    def load_data(self, category: str = 'all') -> Tuple[np.ndarray, np.ndarray, List[str], List[str]]:
         """
-        Load data from HDF5 file.
-
-        Args:
-            filter_patients: If True, only include:
-                            - Normal segments from patients with '_n' in ID (e.g., paf_n01)
-                            - Pre-AF segments (all)
+        Modified loader using your specific record_id logic.
+        Categories: 'pre_af' (p-even), 'nsr' (n01-n25), 'af' (p*c), or 'all'.
         """
         with h5py.File(HDF5_PATH, 'r') as f:
-            grp         = f['all']
-            signals     = grp['signals'][:]
-            labels      = grp['labels'][:]
-            print(f['all'].attrs['n_preaf'], f['all'].attrs['n_normal'])
-            segment_ids = [s.decode() if isinstance(s, bytes) else s
-                           for s in grp['segment_ids'][:]]
-            patient_ids = (
-                [s.decode() if isinstance(s, bytes) else s
-                 for s in grp['patient_ids'][:]]
-                if 'patient_ids' in grp else [''] * len(signals)
-            )
+            grp = f['all']
+            signals = grp['signals'][:]
+            labels = grp['labels'][:]
+            segment_ids = [s.decode() if isinstance(s, bytes) else s for s in grp['segment_ids'][:]]
+            patient_ids = [s.decode() if isinstance(s, bytes) else s for s in grp['patient_ids'][:]]
+            record_ids = [s.decode() if isinstance(s, bytes) else s for s in grp['record_ids'][:]]
 
-        if filter_patients:
-            # Filter: keep all pre-AF (label=1) and only normal (label=0) from '_n' patients
-            keep_indices = []
-            for i in range(len(signals)):
-                if labels[i] == 1:  # Pre-AF: keep all
-                    keep_indices.append(i)
-                elif labels[i] == 0 and '_n' in patient_ids[i].lower():  # Normal from 'n*' patients
-                    keep_indices.append(i)
+        keep_indices = []
 
-            signals = signals[keep_indices]
-            labels = labels[keep_indices]
-            segment_ids = [segment_ids[i] for i in keep_indices]
-            patient_ids = [patient_ids[i] for i in keep_indices]
+        for i, rec_id in enumerate(record_ids):
+            rec_id_lower = rec_id.lower()
+            is_match = False
 
-            print(f"After filtering (pre-AF vs n* normal): {len(signals)} segments")
+            # 1. NSR Logic (n01-n25)
+            if rec_id_lower.startswith('n') and not rec_id_lower.endswith('c'):
+                try:
+                    num_str = ''.join(filter(str.isdigit, rec_id_lower[1:]))
+                    if num_str and 1 <= int(num_str) <= 25:
+                        if category in ['nsr', 'all']:
+                            is_match = True
+                except ValueError:
+                    pass
 
-        print(f"Loaded {len(signals)} — "
-              f"Normal: {sum(labels==0)}, Pre-AF: {sum(labels==1)}")
-        print(f"HDF5: {HDF5_PATH}")
+            # 2. AF Logic (p*c)
+            elif rec_id_lower.startswith('p') and rec_id_lower.endswith('c'):
+                if category in ['af', 'all']:
+                    is_match = True
+
+            # 3. Pre-AF Logic (p-even)
+            elif rec_id_lower.startswith('p') and not rec_id_lower.endswith('c'):
+                try:
+                    num_str = ''.join(filter(str.isdigit, rec_id_lower[1:]))
+                    if num_str and int(num_str) % 2 == 0:
+                        if category in ['pre_af', 'all']:
+                            is_match = True
+                except ValueError:
+                    pass
+
+            if is_match:
+                keep_indices.append(i)
+
+        # Filtering the arrays
+        signals = signals[keep_indices]
+        labels = labels[keep_indices]
+        segment_ids = [segment_ids[i] for i in keep_indices]
+        patient_ids = [patient_ids[i] for i in keep_indices]
+
+        print(f"Loaded {len(signals)} segments for category: {category}")
         return signals, labels, segment_ids, patient_ids
 
     def _decompose(self, signal: np.ndarray) -> Dict[str, Optional[np.ndarray]]:
-        """SWT decomposition with reconstruction (Method 1: SWT + Reconstruction)."""
-        swt    = stationary_wavelet.SWT(wavelet=WAVELET)
+        swt = stationary_wavelet.SWT(wavelet=WAVELET)
         coeffs = swt.decompose(signal, level=SWT_LEVEL)
-
         subbands = {}
         for i in range(SWT_LEVEL):
-            zeroed    = [(np.zeros_like(c[0]), np.zeros_like(c[1])) for c in coeffs]
+            zeroed = [(np.zeros_like(c[0]), np.zeros_like(c[1])) for c in coeffs]
             zeroed[i] = (np.zeros_like(coeffs[i][0]), coeffs[i][1])
             label = f"D{SWT_LEVEL - i}"
             subbands[label] = self.cleaner.preprocess_subband(swt.reconstruct(zeroed))
-
         zeroed = [(c[0], np.zeros_like(c[1])) for c in coeffs]
         subbands['A4'] = self.cleaner.preprocess_subband(swt.reconstruct(zeroed))
-
         return subbands
 
-    def _compute_epsilon(self, signal: np.ndarray, tau: int, m: int) -> float:
-        n_points = len(signal) - (m - 1) * tau
-        if n_points <= 0:
-            raise ValueError(
-                f"Signal too short for tau={tau}, m={m}: "
-                f"need >{(m-1)*tau} samples, got {len(signal)}"
-            )
-        embedded = np.array([signal[i: i + m * tau: tau] for i in range(n_points)])
-        if len(embedded) > 2000:
-            idx      = np.linspace(0, len(embedded) - 1, 2000, dtype=int)
-            embedded = embedded[idx]
+    def get_epsilon(self, signal, tau, m, target_rr=0.01):
+        return RecurrencePlotGenerator.find_epsilon_for_target_rr(signal, tau, m, target_rr)
 
-        percentile = float(np.percentile(pdist(embedded, metric='euclidean'),self.epsilon_percentile))
-        return percentile
+    def get_optimal_params(self, signal):
+        ami = AMI(signal)
+        time_delay = ami.get_first_minimum()
+        fnn = FNN(signal=signal, tau=time_delay)
+        embedding_dim = fnn.get_optimal_dimension()
+        return time_delay, embedding_dim
 
     def _compute_rqa(self, signal: np.ndarray, tau: int, m: int) -> RQAWithEpsilon:
-        epsilon = self._compute_epsilon(signal, tau, m)
-        rp_gen  = recurrence_plot.RecurrencePlotGenerator(
-            signal=signal,
-            time_delay=tau,
-            embedding_dim=m,
-            epsilon=epsilon,
-            path=None,
-            unthresholded=True,
+        epsilon = self.get_epsilon(signal, tau, m)
+        rp_gen = recurrence_plot.RecurrencePlotGenerator(
+            signal=signal, time_delay=tau, embedding_dim=m,
+            epsilon=epsilon, path=None, unthresholded=True,
         )
         rqa, _ = rp_gen.compute_rqa_binary()
         return RQAWithEpsilon(rqa=rqa, epsilon=epsilon)
 
     def _run_single_scale(self, signal: np.ndarray) -> Dict[str, RQAWithEpsilon]:
-        tau = self.single_scale_params['tau']
-        m   = self.single_scale_params['m']
+        tau, m = self.get_optimal_params(signal)
         return {'signal': self._compute_rqa(signal, tau, m)}
 
-    def _run_multi_scale(
-        self, signal: np.ndarray
-    ) -> Optional[Dict[str, RQAWithEpsilon]]:
-        """Method 1: SWT + Reconstruction -> RQA"""
+    def _run_multi_scale(self, signal: np.ndarray) -> Optional[Dict[str, RQAWithEpsilon]]:
         subbands = self._decompose(signal)
-
-        for name in ['D3', 'D4', 'A4']:
-            if subbands.get(name) is None:
-                return None
-
         results = {}
         for name in ANALYSIS_SUBBANDS:
             sb = subbands.get(name)
-            if sb is None:
-                continue
-            params      = self.subband_params[name]
-            results[name] = self._compute_rqa(sb, params['tau'], params['m'])
+            if sb is None: continue
+            tau, m = self.get_optimal_params(sb)
 
+            signal_norm = self.normalize_signal(sb)
+
+            results[name] = self._compute_rqa(signal_norm, tau, m)
         return results
 
-    def run_batch(
-        self,
-        method: str = 'single_scale',  # 'single_scale', 'swt_recon', 'swt_direct', 'dwt_recon'
-        max_samples: Optional[int] = None,
-        filter_patients: bool = True,
-    ) -> List[PAFResult]:
-        """
-        Run RQA analysis on all signals using the specified method.
+    def normalize_signal(self, signal: np.ndarray) -> np.ndarray:
+        return (signal - np.mean(signal)) / np.std(signal)
 
-        Args:
-            method: Which method to use:
-                - 'single_scale': Single-scale RQA on original signal
-                - 'swt_recon': SWT + Reconstruction -> RQA (Method 1)
-                - 'swt_direct': SWT -> Direct RQA from coefficients (Method 2)
-                - 'dwt_recon': DWT + Reconstruction -> RQA (Method 3)
-            max_samples: Optional limit on number of samples to process
-            filter_patients: If True, only use pre-AF vs n* normal patients
-        """
-        signals, labels, segment_ids, patient_ids = self.load_data(filter_patients=filter_patients)
+    def _process_segment(self, data: Tuple, method: str, scale_fn, is_single_scale) -> Optional[PAFResult]:
+        signal, label, segment_id, patient_id = data
+        try:
+            rqa_results = scale_fn(signal)
+            if rqa_results is None: return None
+            return PAFResult(
+                segment_id=segment_id, patient_id=patient_id,
+                label=int(label), single_scale=is_single_scale,
+                method=method, rqa_results=rqa_results,
+            )
+        except Exception as e:
+            print(f"  Error on {segment_id}: {e}")
+            return None
+
+    def run_batch(
+            self,
+            method: str = 'single_scale',
+            category: str = 'all',
+            max_samples: Optional[int] = None,
+            n_jobs: int = -1
+    ) -> List[PAFResult]:
+        signals, labels, segment_ids, patient_ids = self.load_data(category=category)
 
         if max_samples:
-            signals     = signals[:max_samples]
-            labels      = labels[:max_samples]
-            segment_ids = segment_ids[:max_samples]
-            patient_ids = patient_ids[:max_samples]
+            signals, labels = signals[:max_samples], labels[:max_samples]
+            segment_ids, patient_ids = segment_ids[:max_samples], patient_ids[:max_samples]
 
-        # Select the appropriate processing function
         method_map = {
             'single_scale': (self._run_single_scale, "Single-scale RQA", True),
             'swt_recon': (self._run_multi_scale, "Multi-scale RQA (SWT+Recon)", False),
         }
 
-        if method not in method_map:
-            raise ValueError(f"Unknown method '{method}'. Choose from {list(method_map.keys())}")
-
         scale_fn, desc, is_single_scale = method_map[method]
-        results, skipped = [], 0
+        data_list = list(zip(signals, labels, segment_ids, patient_ids))
+        workers = os.cpu_count() if n_jobs == -1 else n_jobs
 
-        for i in tqdm(range(len(signals)), desc=desc):
-            try:
-                rqa_results = scale_fn(signals[i])
-                if rqa_results is None:
-                    skipped += 1
-                    continue
-                results.append(PAFResult(
-                    segment_id=segment_ids[i],
-                    patient_id=patient_ids[i],
-                    label=int(labels[i]),
-                    single_scale=is_single_scale,
-                    method=method,
-                    rqa_results=rqa_results,
-                ))
-            except Exception as e:
-                print(f"  Error on {segment_ids[i]}: {e}")
-                skipped += 1
+        worker_fn = partial(self._process_segment, method=method, scale_fn=scale_fn, is_single_scale=is_single_scale)
 
-        print(f"Done — {len(results)} processed, {skipped} skipped")
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            raw_results = list(
+                tqdm(executor.map(worker_fn, data_list), total=len(data_list), desc=f"{desc} [{category}]"))
+
+        results = [r for r in raw_results if r is not None]
+        print(f"Done — {len(results)} processed, {len(data_list) - len(results)} skipped")
         return results
 
     def results_to_csv(self, results: List[PAFResult], output_path: Path):
-        if not results:
-            print("No results to save.")
-            return
-        rows       = [r.to_dict() for r in results]
+        if not results: return
+        rows = [r.to_dict() for r in results]
         fieldnames = list(rows[0].keys())
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
-        print(f"Saved results to {output_path}")
 
 
 if __name__ == '__main__':
     pipeline = PAFPipeline()
+    results_dir = OUTPUT_DIR / 'results_parallel'
 
-    results_dir = OUTPUT_DIR / 'results_filtered'
+    preaf_results = pipeline.run_batch(method='single_scale', category='pre_af')
+    nsr_results_single = pipeline.run_batch(method='single_scale', category='nsr')
+    #
+    pipeline.results_to_csv(preaf_results, results_dir / 'preaf_single_rqa.csv')
+    pipeline.results_to_csv(nsr_results_single, results_dir / 'nsr_single_rqa.csv')
 
-    results_single = pipeline.run_batch(method='single_scale', filter_patients=True)
-    pipeline.results_to_csv(results_single, results_dir / 'single_scale_rqa.csv')
+    # Example: Run specifically for NSR (Healthy) segments
+    # nsr_results = pipeline.run_batch(method='swt_recon', category='nsr')
+    # preaf_results_multi = pipeline.run_batch(method='swt_recon', category='pre_af')
 
-    results_swt_recon = pipeline.run_batch(method='swt_recon', filter_patients=True)
-    pipeline.results_to_csv(results_swt_recon, results_dir / 'multi_scale_swt_recon_rqa.csv')
+    # pipeline.results_to_csv(nsr_results, results_dir / 'nsr_swt_rqa.csv')
+    # pipeline.results_to_csv(preaf_results_multi, results_dir / 'preaf_swt_rqa.csv')

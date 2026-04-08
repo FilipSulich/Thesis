@@ -96,6 +96,8 @@ class ExperimentRunner:
 
         self.plotter.visualize_absolute_metrics(master_df)
 
+        self.plotter.visualize_aggregated_structural_metrics_violin(master_df)
+
         self.plotter.visualize_bar_comparison_pro(results, master_df, ref_rqa)
 
         self.plotter.visualize_frobenius_distances(master_df)
@@ -252,8 +254,8 @@ def main():
 
     results, master_df, ref_rqa = runner.run_full_experiment(
         n_trials=100,
-        include_leakage=True,
-        include_aliasing=True
+        include_leakage=False,
+        include_aliasing=False
     )
 
 if __name__ == '__main__':

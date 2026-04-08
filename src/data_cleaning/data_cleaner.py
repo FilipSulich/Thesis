@@ -106,7 +106,7 @@ class DataCleaner:
             "rr_cv": round(rr_cv, 3), "reason": "passed"
         }
 
-    def preprocess(self, signal, check_quality=True, max_rr_cv=0.5):
+    def preprocess(self, signal, check_quality=False, max_rr_cv=0.5):
         signal = signal - np.mean(signal) # DC artifact removal
         signal = self.highpass_filter(signal) #to remove the baseline wander (0.5Hz)
 
@@ -117,5 +117,5 @@ class DataCleaner:
         else:
             info = {"reason": "skipped"}
 
-        signal = self.normalize(signal)
+        # signal = self.normalize(signal)
         return signal, info

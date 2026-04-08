@@ -33,7 +33,6 @@ class SubbandCalculator:
 
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
         self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
-        self.PIPELINES2 = ['swt_recon', 'swt_direct', 'dwt_recon']
 
         self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_sine_new'
 
@@ -72,17 +71,10 @@ class SubbandCalculator:
 
     @staticmethod
     def get_optimal_params(signal):
-        """
-        Compute optimal tau and m for time delay embedding.
-
-        Uses AMI for tau and FNN for m. If AMI fails to find a minimum,
-        falls back to tau = max(1, len(signal) // 100).
-        """
         ami = AMI(signal)
         tau = ami.get_first_minimum()
 
         if tau is None:
-            # Fallback: use 1% of signal length or minimum of 1
             tau = max(1, len(signal) // 100)
             print(f"  Warning: AMI found no minimum, using fallback tau={tau}")
 
@@ -93,7 +85,6 @@ class SubbandCalculator:
     @staticmethod
     def get_epsilon(signal, tau, m, target_rr=0.1):
         return RecurrencePlotGenerator.find_epsilon_for_target_rr(signal, tau, m, target_rr)
-
 
     def generate_reference_rqa_values(self, save_path=None):
         if save_path is None:
@@ -277,44 +268,6 @@ class SubbandCalculator:
 
         r = np.corrcoef(V_gt, V_pipe)[0, 1]
         return r
-
-    def compute_crp_det(self, sig_gt, sig_pipe, tau, m, epsilon, min_line_length=2):
-        embed_gt = self.embed_signal(sig_gt, tau, m)
-        embed_pipe = self.embed_signal(sig_pipe, tau, m)
-
-        if embed_gt is None or embed_pipe is None:
-            return 0.0
-
-        N_gt = embed_gt.shape[0]
-        N_pipe = embed_pipe.shape[0]
-
-        crp = np.zeros((N_gt, N_pipe))
-        for i in range(N_gt):
-            dists = np.linalg.norm(embed_pipe - embed_gt[i], axis=1)
-            crp[i, :] = (dists <= epsilon).astype(int)
-
-        total_recurrence = np.sum(crp)
-        if total_recurrence == 0:
-            return 0.0
-
-        diagonal_points = 0
-        for offset in range(-N_gt + 1, N_pipe):
-            diagonal = np.diagonal(crp, offset=offset)
-
-            current_length = 0
-            for val in diagonal:
-                if val == 1:
-                    current_length += 1
-                else:
-                    if current_length >= min_line_length:
-                        diagonal_points += current_length
-                    current_length = 0
-
-            if current_length >= min_line_length:
-                diagonal_points += current_length
-
-        det = diagonal_points / total_recurrence
-        return det
 
     def decompose_signal(self, signal, pipeline_name):
         pipeline_obj = Pipeline(pipeline_name='all', level=self.LEVEL, wavelet=self.WAVELET)

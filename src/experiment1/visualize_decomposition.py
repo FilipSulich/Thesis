@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.recurrence_plot.AMI import AMI
 from src.recurrence_plot.FNN import FNN
-from pipelines.pipeline_wavelets import Pipeline
+from src.pipelines.pipeline_wavelets import Pipeline
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 os.environ['PYOPENCL_NO_CACHE'] = '1'
@@ -94,8 +94,10 @@ class DecompositionVisualizer:
     def generate_composite_sine(self):
         t = np.arange(self.N) / self.FS
         signal = np.zeros(self.N)
-        for band, freq in self.SUBBAND_FREQS.items():
-            signal += np.sin(2 * np.pi * freq * t)
+        # for band, freq in self.SUBBAND_FREQS.items():
+        #     signal += np.sin(2 * np.pi * freq * t)
+
+        signal += np.sin(2 * np.pi * 48* t)
         return signal
 
     def _generate_rossler(self, seed: int = None) -> np.ndarray:
@@ -130,7 +132,6 @@ class DecompositionVisualizer:
         x_resampled = resample(x, self.N)
         return (x_resampled - np.mean(x_resampled)) / (np.std(x_resampled) + 1e-9)
 
-
     def add_awgn(self, signal, snr_db):
         if snr_db is None or np.isinf(snr_db): return signal
         signal_power = np.mean(signal ** 2)
@@ -156,22 +157,34 @@ class DecompositionVisualizer:
             return None, None
 
     def get_optimal_parameters(self, signal):
-        """
-        Compute optimal tau and m for time delay embedding.
+        # 1. Handle extremely short signals (common in DWT direct)
+        N = len(signal)
+        if N < 10:  # Minimal threshold
+            return 1, 1
 
-        Uses AMI for tau and FNN for m. If AMI fails to find a minimum,
-        falls back to tau = max(1, len(signal) // 100).
-        """
         tau_candidate = AMI(signal=signal).get_first_minimum()
 
         if tau_candidate is None:
-            # Fallback: use 1% of signal length or minimum of 1
-            tau = max(1, len(signal) // 100)
-            print(f"  Warning: AMI found no minimum, using fallback tau={tau}")
+            tau = max(1, N // 100)
         else:
             tau = int(tau_candidate)
 
-        m = FNN(tau=tau, signal=signal).get_optimal_dimension()
+        # 2. Safety check for FNN: Ensure we don't try to embed beyond signal length
+        # N - (m-1)*tau must be > 0. Let's ensure at least some samples remain.
+        try:
+            # We wrap FNN in a check to ensure m doesn't exceed
+            # what the signal length can support
+            max_m = max(2, N // (tau if tau > 0 else 1))
+            m_obj = FNN(tau=tau, signal=signal)
+            m = m_obj.get_optimal_dimension()
+
+            # Cap m if FNN suggests something impossible for the array size
+            if m >= max_m:
+                m = max(1, max_m - 1)
+        except Exception as e:
+            print(f"  Warning: FNN failed ({e}), using fallback m=2")
+            m = 2
+
         return tau, m
 
     def get_unthresholded_matrix(self, signal, tau, m):
@@ -181,9 +194,11 @@ class DecompositionVisualizer:
         from pyrqa.metric import EuclideanMetric
         from pyrqa.computation import RPComputation
         from pyrqa.time_series import TimeSeries
+
         ts = TimeSeries(signal, embedding_dimension=m, time_delay=tau)
-        settings = Settings(ts, analysis_type=Cross, neighbourhood=Unthresholded(),
-                            similarity_measure=EuclideanMetric, theiler_corrector=1)
+
+        settings = Settings(ts, analysis_type=Cross, neighbourhood=Unthresholded(),similarity_measure=EuclideanMetric, theiler_corrector=1)
+
         return RPComputation.create(settings, verbose=False).run().recurrence_matrix_reverse_normalized
 
     def visualize_decomposition_with_rps(self, system_type, pipeline_name, snr_levels=[np.inf, 20, 10, 5]):
@@ -197,42 +212,160 @@ class DecompositionVisualizer:
             fig = plt.figure(figsize=(22, 4 * n_bands), constrained_layout=True)
             gs = GridSpec(n_bands, 3, figure=fig, width_ratios=[1.2, 1, 1])
 
-            fig.suptitle(f'{system_type.upper()} | {pipeline_name.upper()} (Trimmed) | Noise: {snr}dB',
-                         fontsize=20, fontweight='bold')
+            name_mapping = {
+                "swt_recon": "SWT-R",
+                "swt_direct": "SWT-D",
+                "dwt_recon": "DWT-R",
+                "dwt_direct": "DWT-D",
+            }
+
+            fig.suptitle(f'{system_type.upper()} test | {name_mapping[pipeline_name]}', fontsize=20, fontweight='bold')
 
             signal_noisy = self.add_awgn(signal_clean, snr)
             subbands = self.decompose_signal(signal_noisy, pipeline_name)
 
             for idx, band in enumerate(self.BAND_NAMES):
-                p = self.reference_params[band]
+                sub_data = subbands[band]
 
-                # TRIM the output before computing RP
-                sub_data = self._trim_signal(subbands[band])
+                # --- FIX: Create time vector for the x-axis ---
+                # We use the length of sub_data in case it was trimmed or resampled
+                time_vector = np.arange(len(sub_data)) / self.FS
+
                 sub_norm = (sub_data - sub_data.mean()) / (sub_data.std() + 1e-9)
                 tau, m = self.get_optimal_parameters(sub_norm)
                 epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(sub_norm, tau, m, target_rr=0.1)
 
-                # Signal
-                ax_sig = fig.add_subplot(gs[idx, 0])
-                ax_sig.plot(sub_data, color='#1f77b4')
-                ax_sig.set_title(f'Subband {band} (N={len(sub_data)})', fontweight='bold')
+                # Signal Plot (Now in Time Domain)
 
+                ax_sig = fig.add_subplot(gs[idx, 0])
+                if pipeline_name == "swt_recon" or pipeline_name == "swt_recon":
+                    ax_sig.plot(time_vector, sub_data, color='#1f77b4')  # Pass time_vector here
+                    ax_sig.set_xlabel('Time (s)')
+                    ax_sig.set_ylabel('Amplitude')
+                else :
+                    ax_sig.plot(sub_data, color='#1f77b4')  # Pass time_vector here
+                    ax_sig.set_xlabel('Sample')
+                    ax_sig.set_ylabel('Magnitude')
+
+                ax_sig.set_title(f'Subband {band}', fontweight='bold')
                 # UTRP
                 ax_ut = fig.add_subplot(gs[idx, 1])
-                ut_mat = self.get_unthresholded_matrix(sub_norm, p['tau'], p['m'])
+                ut_mat = self.get_unthresholded_matrix(sub_norm, tau, m)
                 im_ut = ax_ut.imshow(ut_mat, cmap='magma', origin='lower')
-                ax_ut.set_title(f'UTRP ($\\tau$={p["tau"]}, $m$={p["m"]})')
+                ax_ut.set_title(f'UTRP ($\\tau$={tau}, $m$={m})')
                 plt.colorbar(im_ut, ax=ax_ut, shrink=0.7)
 
                 # Binary RP
                 ax_rp = fig.add_subplot(gs[idx, 2])
-                rp_mat, _ = self.compute_rp(sub_norm, p['tau'], p['m'], epsilon)
+                rp_mat, _ = self.compute_rp(sub_norm, tau, m, epsilon)
                 if rp_mat is not None:
                     ax_rp.imshow(rp_mat, cmap='binary', origin='lower')
                     ax_rp.set_title(f'Binary RP ($\\epsilon$={epsilon:.2f})')
 
             plt.show()
 
+    def visualize_single_band(self, system_type, pipeline_name, band_name, snr=np.inf):
+        """Plots a 1x3 comparison of Signal, UTRP, and Binary RP for one specific band."""
+        if not self.reference_params:
+            self.prepare_reference_parameters(system_type)
+
+        signal_clean = self._get_selected_signal(system_type)
+        signal_noisy = self.add_awgn(signal_clean, snr)
+        subbands = self.decompose_signal(signal_noisy, pipeline_name)
+
+        if band_name not in subbands:
+            print(f"Error: Band {band_name} not found in decomposition. Available: {list(subbands.keys())}")
+            return
+
+        sub_data = subbands[band_name]
+        N_sub = len(sub_data)
+
+        # Calculate Effective FS for time domain scaling
+        if pipeline_name == 'dwt_direct':
+            level = int(band_name[1])
+            effective_fs = self.FS / (2 ** level)
+        else:
+            effective_fs = self.FS
+
+        time_vector = np.arange(N_sub) / effective_fs
+        sub_norm = (sub_data - sub_data.mean()) / (sub_data.std() + 1e-9)
+
+        # Get embedding parameters with previous safety checks
+        tau, m = self.get_optimal_parameters(sub_norm)
+
+        try:
+            epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(sub_norm, tau, m, target_rr=0.1)
+        except Exception:
+            epsilon = 0.5
+
+            # Create the 1x3 plot
+        fig, axes = plt.subplots(1, 3, figsize=(20, 5), constrained_layout=True)
+        fig.suptitle(f'{system_type.upper()} | {pipeline_name.upper()} | Band: {band_name} (SNR: {snr}dB)',
+                     fontsize=16, fontweight='bold')
+
+        # 1. Signal Plot
+        axes[0].plot(time_vector, sub_data, color='#1f77b4')
+        axes[0].set_title(f'Time Domain Signal (N={N_sub})', fontweight='bold')
+        axes[0].set_xlabel('Time (s)')
+        axes[0].set_ylabel('Amplitude')
+
+        # 2. UTRP Plot
+        ut_mat = self.get_unthresholded_matrix(sub_norm, tau, m)
+        im_ut = axes[1].imshow(ut_mat, cmap='magma', origin='lower')
+        axes[1].set_title(f'UTRP ($\\tau$={tau}, $m$={m})')
+        plt.colorbar(im_ut, ax=axes[1], shrink=0.8)
+
+        # 3. Binary RP Plot
+        rp_mat, _ = self.compute_rp(sub_norm, tau, m, epsilon)
+        if rp_mat is not None:
+            axes[2].imshow(rp_mat, cmap='binary', origin='lower')
+            axes[2].set_title(f'Binary RP ($\\epsilon$={epsilon:.2f})')
+
+        plt.show()
+
+    def visualize_raw_signal(self, system_type, snr=np.inf):
+        """Plots the raw system signal with UTRP and Binary RP (No decomposition)."""
+        # 1. Fetch the raw signal directly
+        signal_clean = self._get_selected_signal(system_type)
+
+        # 2. Add noise if specified
+        signal_noisy = self.add_awgn(signal_clean, snr)
+
+        # 3. Normalize for embedding
+        sub_norm = (signal_noisy - signal_noisy.mean()) / (signal_noisy.std() + 1e-9)
+
+        # 4. Compute embedding parameters and time vector
+        tau, m = self.get_optimal_parameters(sub_norm)
+        time_vector = np.arange(len(signal_noisy)) / self.FS
+
+        try:
+            epsilon = RecurrencePlotGenerator.find_epsilon_for_target_rr(sub_norm, tau, m, target_rr=0.1)
+        except Exception:
+            epsilon = 0.5
+
+            # Create 1x3 Visualization
+        fig, axes = plt.subplots(1, 3, figsize=(20, 5), constrained_layout=True)
+        fig.suptitle(f'Single scale {system_type}',fontsize=18, fontweight='bold')
+
+        # --- Time Domain Plot ---
+        axes[0].plot(time_vector, signal_noisy, color='#1f77b4')
+        axes[0].set_title(f'Full Signal', fontweight='bold')
+        axes[0].set_xlabel('Time (s)')
+        axes[0].set_ylabel('Amplitude')
+
+        # --- UTRP Plot ---
+        ut_mat = self.get_unthresholded_matrix(sub_norm, tau, m)
+        im_ut = axes[1].imshow(ut_mat, cmap='magma', origin='lower')
+        axes[1].set_title(f'UTRP ($\\tau$={tau}, $m$={m})')
+        plt.colorbar(im_ut, ax=axes[1], shrink=0.8)
+
+        # --- Binary RP Plot ---
+        rp_mat, _ = self.compute_rp(sub_norm, tau, m, epsilon)
+        if rp_mat is not None:
+            axes[2].imshow(rp_mat, cmap='binary', origin='lower')
+            axes[2].set_title(f'Binary RP ($\\epsilon$={epsilon:.2f})')
+
+        plt.show()
 
 def main():
     visualizer = DecompositionVisualizer(seed=43)
@@ -242,19 +375,35 @@ def main():
     sys_choice = input("Select system (1-3) [1]: ") or "1"
     system_type = {"1": "sine", "2": "lorenz", "3": "rossler"}.get(sys_choice, "sine")
 
-    visualizer.prepare_reference_parameters(system_type)
+    print("\n--- Visualization Mode ---")
+    print("  1. Raw Signal (No Decomposition)")
+    print("  2. Full Decomposition (All Bands)")
+    print("  3. Single Band Focus (From Decomposition)")
+    mode_choice = input("Select mode (1-3) [1]: ") or "1"
 
-    print("\n--- Pipeline Selection ---")
-    print("  1. swt_recon\n  2. swt_direct\n  3. dwt_recon\n  4. dwt_direct\n  5. fir")
-    pipe_choice = input("Select option (1-5) [1]: ") or "1"
-    pipeline_name = {
-        '1': 'swt_recon', '2': 'swt_direct',
-        '3': 'dwt_recon', '4': 'dwt_direct', '5': 'fir'
-    }.get(pipe_choice, 'swt_recon')
+    if mode_choice == "1":
+        snr_val = input("Enter SNR (dB) [inf]: ")
+        snr = float(snr_val) if snr_val and snr_val != "inf" else np.inf
+        visualizer.visualize_raw_signal(system_type, snr)
 
-    snr_levels = [np.inf]
-    visualizer.visualize_decomposition_with_rps(system_type, pipeline_name, snr_levels)
+    elif mode_choice == "2":
+        print("\nSelect Pipeline: 1.swt_recon, 2.swt_direct, 3.dwt_recon, 4.dwt_direct, 5.fir")
+        pipe_choice = input("Choice [1]: ") or "1"
+        pipeline_name = {'1':'swt_recon','2':'swt_direct','3':'dwt_recon','4':'dwt_direct','5':'fir'}.get(pipe_choice, 'swt_recon')
+        visualizer.visualize_decomposition_with_rps(system_type, pipeline_name, [np.inf])
 
+    elif mode_choice == "3":
+        print("\nSelect Pipeline: 1.swt_recon, 2.swt_direct, 3.dwt_recon, 4.dwt_direct, 5.fir")
+        pipe_choice = input("Choice [1]: ") or "1"
+        pipeline_name = {'1':'swt_recon','2':'swt_direct','3':'dwt_recon','4':'dwt_direct','5':'fir'}.get(pipe_choice, 'swt_recon')
+        band_choice = input(f"Enter band (e.g., D3) [D1]: ") or "D1"
+        visualizer.visualize_single_band(system_type, pipeline_name, band_choice)
+
+if __name__ == '__main__':
+    main()
+
+if __name__ == '__main__':
+    main()
 
 if __name__ == '__main__':
     main()

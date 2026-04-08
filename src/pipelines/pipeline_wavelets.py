@@ -1,8 +1,8 @@
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from wavelets.discrete_wavelet_transform import DWT
-from wavelets.stationary_wavelet_transform import SWT
+from src.wavelets.discrete_wavelet_transform import DWT
+from src.wavelets.stationary_wavelet_transform import SWT
 
 import numpy as np
 

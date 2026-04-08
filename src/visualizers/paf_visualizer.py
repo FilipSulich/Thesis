@@ -1,34 +1,38 @@
 import numpy as np
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Tuple
 import h5py
 import matplotlib.pyplot as plt
 import sys
 import os
+
+from scipy.fftpack import hilbert
+from scipy.signal import find_peaks
+
+from src.recurrence_plot.AMI import AMI
+from src.recurrence_plot.FNN import FNN
+from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import src.wavelets.stationary_wavelet_transform as stationary_wavelet
 from src.data_cleaning.data_cleaner import DataCleaner
 
-DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted_clean/paf1')
-HDF5_PATH  = DATA_DIR / 'paf_segments.h5'
-# HDF5_PATH  = DATA_DIR / 'paf_segments_with_quality_check.h5'
+DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new/exp2')
+HDF5_PATH  = DATA_DIR / 'paf_with_quality.h5'
 
-SAMPLING_FREQ  = 256
+SAMPLING_FREQ  = 128
 SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "A4"]
-WAVELET        = 'db4'
+WAVELET        = 'db2'
 
 
 class PAFVisualizer:
     def __init__(
         self,
-        subband_params: Dict[str, Dict[str, Any]],
         hdf5_path: Optional[Path] = None,
         random_seed: int = 42,
     ):
         self.hdf5_path     = hdf5_path or HDF5_PATH
-        self.subband_params = subband_params
         self.rng           = np.random.default_rng(random_seed)
         self.cleaner       = DataCleaner(fs=SAMPLING_FREQ)
 
@@ -86,6 +90,9 @@ class PAFVisualizer:
 
         return reconstructions
 
+    def get_epsilon(selfs, signal, m ,tau):
+        return RecurrencePlotGenerator.find_epsilon_for_target_rr(signal, m, tau, target_rr=0.05)
+
     def compute_rp(
         self,
         signal: np.ndarray,
@@ -125,7 +132,7 @@ class PAFVisualizer:
             epsilon = epsilon_factor * np.std(signal)
         else:
             raise ValueError(f"Unknown epsilon_method: {epsilon_method}")
-
+        # epsilon = self.get_epsilon(signal, m=embedding_dim, tau=time_delay)
         ts = TimeSeries(signal, embedding_dimension=embedding_dim, time_delay=time_delay)
         settings = Settings(
             time_series=ts,
@@ -278,12 +285,11 @@ class PAFVisualizer:
         sig1, label1, seg_id1, _ = self.get_signal(idx1)
         sig2, label2, seg_id2, _ = self.get_signal(idx2)
 
-        params     = self.subband_params['original']
-        time_delay = params['tau']
-        emb_dim    = params['m']
+        time_delay1, emb_dim1 = self.get_optimal_params(sig1)
+        time_delay2, emb_dim2 = self.get_optimal_params(sig2)
 
-        rp1, eps1 = self.compute_rp(sig1, time_delay, emb_dim, epsilon_method, epsilon_factor)
-        rp2, eps2 = self.compute_rp(sig2, time_delay, emb_dim, epsilon_method, epsilon_factor)
+        rp1, eps1 = self.compute_rp(sig1, time_delay1, emb_dim1, epsilon_method, epsilon_factor)
+        rp2, eps2 = self.compute_rp(sig2, time_delay2, emb_dim2, epsilon_method, epsilon_factor)
 
         label_str1, color1 = self._label_meta(label1)
         label_str2, color2 = self._label_meta(label2)
@@ -303,7 +309,7 @@ class PAFVisualizer:
             axes[row, 0].grid(True, alpha=0.3)
 
             if show_unthresholded:
-                rp_u = self.compute_rp_unthresholded(sig, time_delay, emb_dim)
+                rp_u = self.compute_rp_unthresholded(sig, time_delay1, emb_dim1)
                 im = axes[row, 1].imshow(rp_u, cmap='viridis', origin='lower', aspect='equal')
                 axes[row, 1].set_title(f'{label_str} Unthresholded RP')
                 plt.colorbar(im, ax=axes[row, 1], fraction=0.046, pad=0.04)
@@ -314,7 +320,7 @@ class PAFVisualizer:
             axes[row, rp_col].imshow(rp, cmap='binary', origin='lower', aspect='equal')
             axes[row, rp_col].set_title(
                 f'{label_str} RP | RR={self._rr(rp):.4f}\n'
-                f'tau={time_delay}, m={emb_dim}, eps={eps:.4f} ({epsilon_method})'
+                f'tau={time_delay1}, m={emb_dim1}, eps={eps:.4f} ({epsilon_method})'
             )
 
         plt.tight_layout()
@@ -400,8 +406,8 @@ class PAFVisualizer:
 
         for i, name in enumerate(SUBBAND_NAMES):
             sub = subbands[name]
-            params = self.subband_params[name]
-            tau, m = params['tau'], params['m']
+
+            tau, m = self.get_optimal_params(sub)
 
             if sub is None:
                 axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
@@ -442,7 +448,7 @@ class PAFVisualizer:
                 rr = self._rr(rp)
                 axes[i, rp_col].imshow(rp, cmap='binary', origin='lower', aspect='equal')
                 axes[i, rp_col].set_title(
-                    f'{name} RP | RR={rr:.4f}, eps={epsilon:.4f}, tau={tau}, m={m}'
+                    f'{name}| eps={epsilon:.4f}, tau={tau}, m={m}, wavelet={WAVELET}'
                 )
             except (ValueError, Exception) as e:
                 axes[i, rp_col].text(0.5, 0.5, f'{name}: RP error\n{str(e)[:30]}',
@@ -475,7 +481,7 @@ class PAFVisualizer:
         idx_n: int,
         idx_p: int,
         epsilon_method: str = 'percentile',
-        epsilon_factor: float = 0.05,
+        epsilon_factor: float = 0.1,
         show_unthresholded: bool = False,
         save_path: Optional[Path] = None,
     ):
@@ -509,8 +515,7 @@ class PAFVisualizer:
 
         for i, name in enumerate(SUBBAND_NAMES):
             sub = subbands[name]
-            params = self.subband_params[name]
-            tau, m = params['tau'], params['m']
+            tau, m = self.get_optimal_params(sub)
 
             if sub is None:
                 axes[i, 0].text(0.5, 0.5, f'{name}: insufficient energy',
@@ -542,18 +547,194 @@ class PAFVisualizer:
             print(f"  Saved: {save_path.name}")
         plt.close('all')
 
+    def get_optimal_params(self, signal):
+        ami = AMI(signal)
+        time_delay = ami.get_first_minimum()
+        fnn = FNN(signal=signal, tau=time_delay)
+        embedding_dim = fnn.get_optimal_dimension()
+
+        return time_delay, embedding_dim
+
+    def _get_signal_context(self, idx: int):
+        """Helper to get signal, metadata, and time axis in one call."""
+        sig, label, sid, pid = self.get_signal(idx)
+        label_str, color = ('Pre-AF', 'red') if label == 1 else ('Normal', 'blue')
+        t = np.arange(len(sig)) / SAMPLING_FREQ
+        return sig, t, label_str, color, sid, pid
+
+    def plot_subband_envelopes(self, idx: int, save_path: Optional[Path] = None, show: bool = True):
+        """
+        Calculates and plots the Hilbert envelope for each wavelet subband.
+        The envelope represents the instantaneous amplitude of the signal.
+        """
+        sig, t_orig, l_str, color, sid, pid = self._get_signal_context(idx)
+        subbands = self.decompose_signal(sig)
+
+        fig, axes = plt.subplots(len(SUBBAND_NAMES), 1, figsize=(14, 12), sharex=True)
+        fig.suptitle(f'Hilbert Envelopes | {l_str} | {sid} | Patient: {pid}', fontsize=14)
+
+        for i, name in enumerate(SUBBAND_NAMES):
+            sub = subbands[name]
+            ax = axes[i]
+
+            if sub is not None:
+                # 1. Compute the analytic signal using the Hilbert transform
+                analytic_signal = hilbert(sub)
+                # 2. The envelope is the magnitude (absolute value) of the analytic signal
+                amplitude_envelope = np.abs(analytic_signal)
+
+                t_sub = np.arange(len(sub)) / SAMPLING_FREQ
+
+                # Plot the original subband signal in a lighter shade
+                ax.plot(t_sub, sub, color=color, alpha=0.3, linewidth=0.5, label='Subband')
+                # Plot the Hilbert envelope on top
+                ax.plot(t_sub, amplitude_envelope, color='black', linewidth=1.2, label='Envelope')
+
+                ax.set_ylabel(f'{name}')
+                ax.legend(loc='upper right', fontsize=8)
+                ax.grid(True, alpha=0.2)
+            else:
+                ax.text(0.5, 0.5, f'{name}: Insufficient Energy',
+                        ha='center', va='center', transform=ax.transAxes)
+
+        axes[-1].set_xlabel('Time (s)')
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust for suptitle
+
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        if show:
+            plt.show()
+
+    def _detect_r_peaks(self, signal: np.ndarray) -> np.ndarray:
+        """Basic R-peak detection using height and distance constraints."""
+        # Normalize signal for peak detection consistency
+        norm_sig = (signal - np.mean(signal)) / np.std(signal)
+        # Assuming min heart rate of 40bpm at 128Hz -> ~192 samples distance
+        # We use a lower bound (0.4s) to catch faster rates
+        min_dist = int(0.4 * SAMPLING_FREQ)
+        peaks, _ = find_peaks(norm_sig, distance=min_dist, height=1.5)
+        return peaks
+
+    def plot_single_rr_analysis(
+            self,
+            idx: int,
+            rr_index: int = 1,  # Which heartbeat to pick (0 is first, 1 is usually more stable)
+            epsilon_method: str = 'percentile',
+            epsilon_factor: float = 0.05,
+            save_path: Optional[Path] = None
+    ):
+        """
+        Detects R-peaks, extracts a single RR interval, decomposes it,
+        and visualizes the subbands alongside their Recurrence Plots.
+        """
+        sig, t_orig, l_str, color, sid, pid = self._get_signal_context(idx)
+        peaks = self._detect_r_peaks(sig)
+
+        if len(peaks) < rr_index + 2:
+            print(f"Not enough heartbeats found in segment {sid}")
+            return
+
+        # Extract the specific RR interval
+        start_idx = peaks[rr_index]
+        end_idx = peaks[rr_index + 1]
+        rr_signal = sig[start_idx:end_idx]
+
+        # Decompose only this interval
+        subbands = self.decompose_signal(rr_signal)
+
+        fig, axes = plt.subplots(len(SUBBAND_NAMES), 2, figsize=(12, 18))
+        fig.suptitle(f'Single RR Interval Analysis | {l_str} | {sid}\n'
+                     f'Interval: {start_idx / SAMPLING_FREQ:.2f}s to {end_idx / SAMPLING_FREQ:.2f}s', fontsize=14)
+
+        for i, name in enumerate(SUBBAND_NAMES):
+            sub = subbands[name]
+            if sub is None: continue
+
+            # 1. Plot Subband Signal
+            t_rr = np.arange(len(sub)) / SAMPLING_FREQ
+            axes[i, 0].plot(t_rr, sub, color=color, linewidth=1)
+            axes[i, 0].set_ylabel(f'{name}')
+            axes[i, 0].grid(True, alpha=0.2)
+            if i == 0: axes[i, 0].set_title("Subband Signal")
+
+            # 2. Compute and Plot RP
+            try:
+                tau, m = self.get_optimal_params(sub)
+                rp, eps = self.compute_rp(sub, tau, m, epsilon_method, epsilon_factor)
+                rr_val = self._rr(rp)
+
+                axes[i, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
+                axes[i, 1].set_title(f'RP: RR={rr_val:.4f}, eps={eps:.4f}, m={m}')
+            except Exception as e:
+                axes[i, 1].text(0.5, 0.5, f"RP Error: {str(e)[:20]}",
+                                ha='center', transform=axes[i, 1].transAxes)
+
+        axes[-1, 0].set_xlabel('Time (s) within RR')
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        plt.show()
+
+    def plot_utrp_feature_visibility(
+            self,
+            idx: int,
+            subband_to_test: str = 'D4',
+            zoom_samples: int = 512,  # Focus on a few beats
+            save_path: Optional[Path] = None
+    ):
+        """
+        Comparison of Raw vs Subband UTRP to prove multi-scale unmasking.
+        """
+        sig, _, l_str, color, sid, pid = self._get_signal_context(idx)
+        subbands = self.decompose_signal(sig)
+        sub = subbands[subband_to_test]
+
+        # Focus on a specific window to see texture clearly
+        start = len(sig) // 2
+        raw_window = sig[start: start + zoom_samples]
+        sub_window = sub[start: start + zoom_samples]
+
+        # Z-normalize both for fair contrast comparison
+        raw_window = (raw_window - np.mean(raw_window)) / np.std(raw_window)
+        sub_window = (sub_window - np.mean(sub_window)) / np.std(sub_window)
+
+        # Use a fixed tau/m for comparison proof
+        tau, m = 4, 3
+
+        # Compute Unthresholded Matrices (UTRP)
+        rp_raw = self.compute_rp_unthresholded(raw_window, tau, m)
+        rp_sub = self.compute_rp_unthresholded(sub_window, tau, m)
+
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle(f'Raw vs {subband_to_test} | {l_str}', fontsize=16)
+
+        # Row 1: Signals
+        axes[0, 0].plot(raw_window, color='gray', alpha=0.8)
+        axes[0, 0].set_title("Raw Signal (Z-Normalized)")
+
+        axes[0, 1].plot(sub_window, color=color)
+        axes[0, 1].set_title(f"Subband {subband_to_test} (Z-Normalized)")
+
+        # Row 2: UTRPs
+        im1 = axes[1, 0].imshow(rp_raw, cmap='magma', origin='lower')
+        axes[1, 0].set_title("Raw UTRP ")
+        plt.colorbar(im1, ax=axes[1, 0])
+
+        im2 = axes[1, 1].imshow(rp_sub, cmap='magma', origin='lower')
+        axes[1, 1].set_title(f"{subband_to_test} UTRP")
+        plt.colorbar(im2, ax=axes[1, 1])
+
+        plt.tight_layout()
+        if save_path: plt.savefig(save_path)
+        plt.show()
+
 if __name__ == '__main__':
-    subband_params = {
-        "original": {"tau": 12,  "m": 7},
-        'D1': {'tau': 1, 'm': 7},
-        'D2': {'tau': 2, 'm': 7},
-        'D3': {'tau': 3, 'm': 7},
-        'D4': {'tau': 6, 'm': 7},
-        'A4': {'tau': 20, 'm': 7},
-    }
 
 
-    viz = PAFVisualizer(subband_params=subband_params, random_seed=42)
+
+
+    viz = PAFVisualizer(random_seed=43)
     #42,43 seeds are good
 
     epsilon_method = 'percentile'
@@ -567,7 +748,11 @@ if __name__ == '__main__':
     output_dir = Path(__file__).parent.parent.parent / 'outputs' / 'paf_visualizations_3methods'
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    indices = viz.get_random_indices(n_normal=2, n_preaf=2)
-
     viz.investigate(idx_p)
-    viz.investigate(idx_n)
+    # viz.investigate(idx_n)
+    subbands = ['D1', 'D2', 'D3', 'D4', 'A4']
+
+    # for subband in subbands:
+    #     viz.plot_utrp_feature_visibility(idx_p, subband_to_test=subband)
+        # viz.plot_utrp_feature_visibility(idx_n, subband_to_test=subband)
+    # viz.plot_subband_envelopes(idx_p, save_path=output_dir)

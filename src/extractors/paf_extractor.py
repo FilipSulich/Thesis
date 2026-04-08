@@ -17,8 +17,8 @@ from wavelets.stationary_wavelet_transform import SWT
 
 
 DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
-OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/extracted_clean/paf1')
-HDF5_PATH  = OUTPUT_DIR / 'paf_segment_no_quality.h5'
+OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new/exp2')
+HDF5_PATH  = OUTPUT_DIR / 'paf_with_quality.h5'
 
 SEGMENT_DURATION_SEC = 10
 SAMPLING_FREQ        = 128

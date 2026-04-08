@@ -1,0 +1,24 @@
+\begin{table}[htbp]
+\centering
+\caption{Wavelet selection summary. DER (Diagonal Energy Ratio) measures spectral isolation from the Experiment~1 sine test. GSR (Group Separability Ratio) is averaged across all subbands and measures UTRP discriminability between pre-AF and NSR. All GSR values lie within 0.01 of unity, indicating no meaningful difference across wavelets. \dag~= selected wavelet (shortest filter with DER~$>$~0.97).}
+\label{tab:wavelet_selection}
+\rowcolors{2}{white}{gray!8}
+\begin{tabular}{llccccc}
+\toprule
+Family & Wavelet & Filter & DER & GSR\textsubscript{Frob} & GSR\textsubscript{Corr} & GSR\textsubscript{RQA} \\
+& & length & & & & \\
+\midrule
+Coiflet & coif1 & 6 & 0.948 & 1.0043 & 1.0062 & 1.0135 \\
+Coiflet & coif2 & 12 & \textbf{0.987} & 1.0058 & 1.0088 & 1.0157 \\
+Coiflet & coif4 & 24 & \textbf{0.998} & 1.0063 & 1.0099 & 1.0130 \\
+\midrule
+Daubechies & db2 & 4 & 0.944 & 1.0043 & 1.0061 & 1.0139 \\
+\rowcolor{blue!12} Daubechies & db4† & 8 & \textbf{0.985} & 1.0057 & 1.0086 & 1.0154 \\
+Daubechies & db6 & 12 & \textbf{0.994} & 1.0062 & 1.0097 & 1.0154 \\
+\midrule
+Symlet & sym2 & 4 & 0.944 & 1.0043 & 1.0061 & 1.0139 \\
+Symlet & sym4 & 8 & \textbf{0.985} & 1.0057 & 1.0086 & 1.0154 \\
+Symlet & sym6 & 12 & \textbf{0.994} & 1.0062 & 1.0097 & 1.0153 \\
+\bottomrule
+\end{tabular}
+\end{table}
