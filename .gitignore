@@ -4,3 +4,4 @@ __pycache__
 .idea
 /data/outputs
 /data/data_new
+*.h5
