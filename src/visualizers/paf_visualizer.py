@@ -749,7 +749,7 @@ if __name__ == '__main__':
     output_dir.mkdir(parents=True, exist_ok=True)
 
     viz.investigate(idx_p)
-    # viz.investigate(idx_n)
+    viz.investigate(idx_n)
     subbands = ['D1', 'D2', 'D3', 'D4', 'A4']
 
     # for subband in subbands:

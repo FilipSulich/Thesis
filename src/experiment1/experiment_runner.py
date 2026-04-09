@@ -102,8 +102,6 @@ class ExperimentRunner:
 
         self.plotter.visualize_frobenius_distances(master_df)
 
-        # self.plotter.plot_cross_band_summary(master_df)
-
         summary_df = self.summarize_results(results)
         summary_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'summary_metrics.csv'), index=False)
 
@@ -254,8 +252,8 @@ def main():
 
     results, master_df, ref_rqa = runner.run_full_experiment(
         n_trials=100,
-        include_leakage=False,
-        include_aliasing=False
+        include_leakage=True,
+        include_aliasing=True
     )
 
 if __name__ == '__main__':

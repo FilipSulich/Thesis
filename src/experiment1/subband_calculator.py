@@ -18,17 +18,21 @@ sys.path.insert(0, current_dir)
 class SubbandCalculator:
     def __init__(self, is_sine):
         self.FS = 128
-        self.N = 512
+        self.N = 1024
         self.LEVEL = 4
         self.WAVELET = 'db4'
         self.is_sine = is_sine
 
+        # self.SUBBAND_FREQS = {
+        #     'A4': 1,
+        #     'D4': 5,   # 4-8 Hz
+        #     'D3': 13,  # 8-16 Hz
+        #     'D2': 23,  # 16-32 Hz
+        #     'D1': 47   # 32-64 Hz
+        # }
+        #
         self.SUBBAND_FREQS = {
-            'A4': 2,   # 0-4 Hz
-            'D4': 6,   # 4-8 Hz
-            'D3': 12,  # 8-16 Hz
-            'D2': 24,  # 16-32 Hz
-            'D1': 48   # 32-64 Hz
+            'A4': 2, 'D4': 6, 'D3': 12, 'D2': 24, 'D1': 48
         }
 
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']

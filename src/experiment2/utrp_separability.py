@@ -195,12 +195,8 @@ class UTRPSeparabilityAnalyzer:
             pre_af_utrps = [d[0] for d in pre_af_data if d[0] is not None]
             nsr_utrps = [d[0] for d in nsr_data if d[0] is not None]
 
-            # Distance GSR
             frob = compute_gsr(pre_af_utrps, nsr_utrps, frobenius_distance)
-            # wass = compute_gsr(pre_af_utrps, nsr_utrps, wasserstein_utrp_distance)
-            # spec = compute_gsr(pre_af_utrps, nsr_utrps, spectral_utrp_distance)
 
-            # Entropy Stats Collection
             ent_rows = []
             for m_name in ['samp_en', 'perm_en', 'wave_en']:
                 pre_v = [d[2][m_name] for d in pre_af_data if d[2] is not None]
@@ -211,14 +207,11 @@ class UTRPSeparabilityAnalyzer:
             row = {
                 'wavelet': wavelet, 'subband': subband,
                 'gsr_frob': frob['gsr'],
-                # 'gsr_wass': wass['gsr'],
-                # 'gsr_spec': spec['gsr'],
                 **{k: v for d in ent_rows for k, v in d.items()}
             }
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        # Apply Holm Correction per wavelet across subbands/measures
         p_cols = [c for c in df.columns if c.startswith('p_')]
         for col in p_cols:
             df[f'{col}_adj'] = self._holm_correction(df[col].values)

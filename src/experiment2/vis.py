@@ -23,7 +23,7 @@ HDF5_PATH = DATA_DIR / 'paf_with_quality.h5'
 
 SAMPLING_FREQ = 128
 SUBBAND_NAMES = ["D1", "D2", "D3", "D4", "A4"]
-WAVELET = 'db2'
+WAVELET = 'coif2'
 
 
 class PAFVisualizer:
@@ -299,7 +299,7 @@ class PAFVisualizer:
         return sig, t, label_str, color, sid, pid
 
     def investigate(self, idx: int, epsilon_method: str = 'percentile', epsilon_factor: float = 0.05):
-        # self.plot_signal(idx)
+        self.plot_signal(idx)
         self.plot_subband_rps(idx, epsilon_method=epsilon_method, epsilon_factor=epsilon_factor)
 
 
