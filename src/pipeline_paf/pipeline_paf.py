@@ -22,7 +22,7 @@ import src.wavelets.stationary_wavelet_transform as stationary_wavelet
 import src.recurrence_plot.recurrence_plot_generation as recurrence_plot
 from src.data_cleaning.data_cleaner import DataCleaner
 
-OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new/exp2')
+OUTPUT_DIR = Path('/data/data_new/exp2')
 HDF5_PATH = OUTPUT_DIR / 'paf_with_quality.h5'
 
 SAMPLING_FREQ = 128

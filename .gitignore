@@ -2,5 +2,5 @@
 .DS_STORE
 __pycache__
 .idea
-/outputs
-/data_new
+/data/outputs
+/data/data_new

@@ -13,7 +13,7 @@ if __name__ == '__main__':
     N_PATIENTS_QUICK = 25
     N_SEGMENTS_QUICK = 5
 
-    DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new/exp2')
+    DATA_DIR = Path('/data/data_new/exp2')
     HDF5_PATH = DATA_DIR / 'paf_with_quality.h5'
 
     segments_pre_af, segments_nsr, _ = load_segments_from_hdf5(HDF5_PATH)

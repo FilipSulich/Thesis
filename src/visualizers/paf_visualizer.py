@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.wavelets.stationary_wavelet_transform as stationary_wavelet
 from src.data_cleaning.data_cleaner import DataCleaner
 
-DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new/exp2')
+DATA_DIR   = Path('/data/data_new/exp2')
 HDF5_PATH  = DATA_DIR / 'paf_with_quality.h5'
 
 SAMPLING_FREQ  = 128

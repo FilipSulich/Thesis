@@ -46,7 +46,7 @@ class SineNoiseBenchmark:
         self.N = n_samples
         self.SNR_LEVELS = [20, 10, 5, 0]
         self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon']
-        self.OUTPUT_DIR = '../../outputs/sine_noise_benchmark'
+        self.OUTPUT_DIR = '../../data/outputs/sine_noise_benchmark'
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
         self._results: list[dict] = []
         self.calculator = SubbandCalculator(is_sine=True)

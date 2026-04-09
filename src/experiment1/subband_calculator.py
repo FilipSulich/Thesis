@@ -38,7 +38,7 @@ class SubbandCalculator:
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
         self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
 
-        self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/experiment1_sine_new'
+        self.OUTPUT_DIR = '/data/outputs/experiment1_sine_new'
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
