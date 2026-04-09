@@ -258,7 +258,6 @@ class UTRPSeparabilityAnalyzer:
         Ranks wavelets using a composite of Effect Size, GSR, and Significance.
         """
         ranking_rows = []
-
         for wavelet, grp in results_df.groupby('wavelet'):
             # Target subbands (Clinical Signal)
             clinical = grp[grp['subband'].isin(['D3', 'D4'])]
