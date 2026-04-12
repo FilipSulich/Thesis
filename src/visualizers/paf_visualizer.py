@@ -19,11 +19,11 @@ import src.wavelets.stationary_wavelet_transform as stationary_wavelet
 from src.data_cleaning.data_cleaner import DataCleaner
 
 DATA_DIR   = Path('/data/data_new/exp2')
-HDF5_PATH  = DATA_DIR / 'paf_with_quality.h5'
+HDF5_PATH  = DATA_DIR / 'paf_new.h5'
 
 SAMPLING_FREQ  = 128
 SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "A4"]
-WAVELET        = 'db2'
+WAVELET        = 'coif2'
 
 
 class PAFVisualizer:
@@ -553,6 +553,9 @@ class PAFVisualizer:
         fnn = FNN(signal=signal, tau=time_delay)
         embedding_dim = fnn.get_optimal_dimension()
 
+        # time_delay = 3
+        # embedding_dim = 3
+
         return time_delay, embedding_dim
 
     def _get_signal_context(self, idx: int):
@@ -730,11 +733,8 @@ class PAFVisualizer:
         plt.show()
 
 if __name__ == '__main__':
-
-
-
-
-    viz = PAFVisualizer(random_seed=43)
+    path = Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/exp2/paf_new.h5")
+    viz = PAFVisualizer(path, random_seed=43)
     #42,43 seeds are good
 
     epsilon_method = 'percentile'

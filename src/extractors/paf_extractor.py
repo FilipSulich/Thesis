@@ -1,3 +1,5 @@
+import re
+
 import wfdb
 import numpy as np
 import h5py
@@ -17,8 +19,8 @@ from wavelets.stationary_wavelet_transform import SWT
 
 
 DATA_DIR   = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
-OUTPUT_DIR = Path('/data/data_new/exp2')
-HDF5_PATH  = OUTPUT_DIR / 'paf_with_quality.h5'
+OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/exp2')
+HDF5_PATH  = OUTPUT_DIR / 'paf_new.h5'
 
 SEGMENT_DURATION_SEC = 10
 SAMPLING_FREQ        = 128
@@ -51,33 +53,53 @@ class PAFExtractor:
         self._rejection_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     def _label(self, record_id: str) -> Optional[int]:
+        """
+        CORRECTED LABELING (Sensors 2024 / AFPDB Ground Truth):
+        - p-odd (p01, p03...): Pre-AF (Class 1)
+        - p-even (p02, p04...): Distant / Non-AF (Class 0)
+        - n* : Healthy / Non-AF (Class 0)
+        """
         if record_id.endswith('c') or record_id.startswith('t'):
             return None
-        if record_id.startswith('n'):
+
+        # Extract the numeric part regardless of prefix
+        match = re.search(r'\d+', record_id)
+        if not match: return None
+        num = int(match.group())
+
+        if 'n' in record_id:
             return 0
-        if record_id.startswith('p'):
-            try:
-                return 1 if int(record_id[1:]) % 2 == 0 else 0
-            except ValueError:
-                return None
+        if 'p' in record_id:
+            return 1 if num % 2 != 0 else 0
         return None
 
     def _patient_id(self, record_id: str) -> str:
-        if record_id.startswith('p'):
-            pair_base = ((int(record_id[1:]) - 1) // 2) + 1
-            return f"paf_p{pair_base:02d}"
+        """
+        Robustly groups records into unique human subjects.
+        p01 and p02 -> paf_subject_p01
+        n01 and n02 -> paf_subject_n01
+        """
+        match = re.search(r'([pn])(\d+)', record_id)
+        if match:
+            prefix = match.group(1)
+            num = int(match.group(2))
+            # Group pairs: (01,02)->1, (03,04)->2
+            pair_base = (num + 1) // 2
+            return f"paf_subject_{prefix}{pair_base:02d}"
         return f"paf_{record_id}"
 
     def _get_all_records(self) -> Dict[str, List[str]]:
+        """Scans directory and categorizes records based on corrected labels."""
         records = {'normal': [], 'preaf': []}
         for hea in sorted(DATA_DIR.glob('*.hea')):
-            rid   = hea.stem
+            rid = hea.stem
             label = self._label(rid)
             if label == 0:
                 records['normal'].append(rid)
             elif label == 1:
                 records['preaf'].append(rid)
         return records
+
 
     def _decompose_to_subbands(self, signal: np.ndarray) -> Dict[str, Optional[np.ndarray]]:
         coeffs = self.swt.decompose(signal, level=self.swt_level)
@@ -196,109 +218,33 @@ class PAFExtractor:
 
         self._print_rejection_summary()
 
-    # ------------------------------------------------------------------
-    # Balanced extraction
-    # ------------------------------------------------------------------
 
-    def extract_all(self, segments_per_record: int = 50) -> List[PAFSegment]:
-        """
-        Extract segments from ALL patients (n* and p*) without balancing or pairing.
-
-        Strategy:
-          1. Extract from all pre-AF records (p-even)
-          2. Extract from all normal records (p-odd + n*)
-          3. No balancing - return all accepted segments
-
-        Parameters
-        ----------
-        segments_per_record : int
-            Number of segments to extract from each record
-
-        Returns
-        -------
-        List[PAFSegment]
-            All extracted segments (not necessarily balanced)
-        """
+    def extract_all(self, segments_per_record: int = 170) -> List[PAFSegment]:
         records = self._get_all_records()
         self._rejection_counts.clear()
 
-        print(f"Found {len(records['preaf'])} pre-AF records, "
-              f"{len(records['normal'])} normal records")
-        print(f"Extracting ALL patients (n* and p*) - NO BALANCING")
-        print(f"Extracting up to {segments_per_record} segments per record...")
-        print(f"  Pre-AF  max_rr_cv={MAX_RR_CV_PREAF}")
-        print(f"  Normal  max_rr_cv={MAX_RR_CV_NORMAL}")
+        print(f"Detected: {len(records['preaf'])} Pre-AF (p-odd) | {len(records['normal'])} Normal (n* & p-even)")
 
         all_segments: List[PAFSegment] = []
 
-        # Extract from all pre-AF records (p-even)
-        preaf_segments: List[PAFSegment] = []
-        for rid in tqdm(records['preaf'], desc="Pre-AF records (p-even)"):
+        for rid in tqdm(records['preaf'], desc="Extracting Pre-AF (p-odd)"):
             segs = self._extract_from_record(rid, label=1, n_segments=segments_per_record)
-            preaf_segments.extend(segs)
+            all_segments.extend(segs)
 
-        print(f"Pre-AF segments accepted: {len(preaf_segments)}")
-
-        # Extract from all n* records (healthy subjects)
-        n_records = [rid for rid in records['normal'] if rid.startswith('n')]
-        n_segments: List[PAFSegment] = []
-        for rid in tqdm(n_records, desc="Normal records (n*)"):
+        # 2. Normal / Distant (p-even & n*)
+        for rid in tqdm(records['normal'], desc="Extracting Non-AF (p-even & n*)"):
             segs = self._extract_from_record(rid, label=0, n_segments=segments_per_record)
-            n_segments.extend(segs)
-
-        print(f"n* segments accepted: {len(n_segments)}")
-
-        # Extract from all p-odd records (PAF patients, normal rhythm)
-        p_odd_records = [rid for rid in records['normal'] if rid.startswith('p')]
-        p_odd_segments: List[PAFSegment] = []
-        for rid in tqdm(p_odd_records, desc="Normal records (p-odd)"):
-            segs = self._extract_from_record(rid, label=0, n_segments=segments_per_record)
-            p_odd_segments.extend(segs)
-
-        print(f"p-odd segments accepted: {len(p_odd_segments)}")
-
-        all_segments = preaf_segments + n_segments + p_odd_segments
+            all_segments.extend(segs)
 
         self._print_rejection_summary()
-
-        print(f"\nExtraction complete:")
-        print(f"  Pre-AF (p-even)  : {len(preaf_segments)}")
-        print(f"  Normal (n*)      : {len(n_segments)}")
-        print(f"  Normal (p-odd)   : {len(p_odd_segments)}")
-        print(f"  Total Normal     : {len(n_segments) + len(p_odd_segments)}")
-        print(f"  Total All        : {len(all_segments)}")
-
         return all_segments
 
 
-    def export_to_hdf5(self, segments_per_record: int = 50, export_csv: bool = True, balanced: bool = False, include_n_records: bool = True, n_record_proportion: float = 0.3):
-        """
-        Extract and export PAF segments to HDF5.
+    def export_to_hdf5(self, segments_per_record: int = 50, export_csv: bool = True):
 
-        Parameters
-        ----------
-        segments_per_record : int
-            Number of segments to extract from each record
-        export_csv : bool
-            Whether to export CSV files
-        balanced : bool
-            If True, balance pre-AF and normal counts
-            If False, extract all segments from all patients
-        include_n_records : bool
-            Whether to include n* (normal subjects) records (only for balanced mode)
-        n_record_proportion : float
-            Proportion of normal quota for n* records (only for balanced mode, 0.0-1.0)
-        """
-        if balanced:
-            segments = self.extract_balanced(
-                segments_per_record=segments_per_record,
-                include_n_records=include_n_records,
-                n_record_proportion=n_record_proportion
-            )
-        else:
-            segments = self.extract_all(
-                segments_per_record=segments_per_record
-            )
+        segments = self.extract_all(
+            segments_per_record=segments_per_record
+        )
 
         n_preaf  = sum(s.label == 1 for s in segments)
         n_normal = sum(s.label == 0 for s in segments)
@@ -393,5 +339,4 @@ if __name__ == '__main__':
     extractor.export_to_hdf5(
         segments_per_record=1000,
         export_csv=True,
-        balanced=False  # Extract all, don't balance
     )

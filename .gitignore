@@ -5,3 +5,6 @@ __pycache__
 /data/outputs
 /data/data_new
 *.h5
+/results
+/multi_resnet
+/outputs

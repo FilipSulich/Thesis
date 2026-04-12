@@ -25,6 +25,12 @@ class RecurrencePlotGenerator:
         rp = rp_computation.run()
         return rqa, rp
 
+    def compute_rp_unthresholded(
+            self,
+    ) -> np.ndarray:
+        result = RPComputation.create(self.settings_unthreshold, verbose=False).run()
+        return result.recurrence_matrix_reverse_normalized
+
     def compute_rqa(self, signal, epsilon):
         settings_new = Settings(time_series=signal, analysis_type=Classic,neighbourhood=FixedRadius(epsilon), similarity_measure=EuclideanMetric,theiler_corrector=1)
 

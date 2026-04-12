@@ -186,10 +186,6 @@ class SubbandCalculator:
 
         return reference_data
 
-    def get_analytic_embedding_params(self, freq, signal):
-        tau, m = self.get_optimal_params(signal)
-        return tau, m
-
     def compute_frobenius_distance(self, dist_matrix_ref, dist_matrix_pipe):
         """
         Compute Frobenius norm (Euclidean distance) between two distance matrices.

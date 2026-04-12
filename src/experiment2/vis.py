@@ -270,12 +270,10 @@ class PAFVisualizer:
             axes[row, 0].set_title(f'{l_str} | {sid}')
             axes[row, 0].set_ylabel('Amplitude')
 
-            # Col 1: RP
             rp, eps = self.compute_rp(sig, tau, m, epsilon_method, epsilon_factor)
             axes[row, 1].imshow(rp, cmap='binary', origin='lower', aspect='equal')
             axes[row, 1].set_title(f'RP | RR={self._rr(rp):.4f}\neps={eps:.4f}')
 
-            # Col 2: UTRP
             rp_u = self.compute_rp_unthresholded(sig, tau, m)
             im = axes[row, 2].imshow(rp_u, cmap='viridis', origin='lower', aspect='equal')
             axes[row, 2].set_title('UTRP')
@@ -304,7 +302,8 @@ class PAFVisualizer:
 
 
 if __name__ == '__main__':
-    viz = PAFVisualizer(random_seed=43)
+    path = Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/exp2/paf_with_quality.h5")
+    viz = PAFVisualizer(path, random_seed=43)
     indices = viz.get_random_indices(n_normal=1, n_preaf=1)
 
     idx_p = indices['preaf'][0]
