@@ -21,8 +21,8 @@ from src.data_cleaning.data_cleaner import DataCleaner
 DATA_DIR   = Path('/data/data_new/exp2')
 HDF5_PATH  = DATA_DIR / 'paf_new.h5'
 
-SAMPLING_FREQ  = 128
-SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "A4"]
+SAMPLING_FREQ  = 500
+SUBBAND_NAMES  = ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "A7"]
 WAVELET        = 'coif2'
 
 
@@ -70,7 +70,7 @@ class PAFVisualizer:
     def decompose_signal(self, signal: np.ndarray) -> Dict[str, np.ndarray]:
         """SWT decomposition with reconstruction for each subband (zeroing out other coefficients)."""
         swt    = stationary_wavelet.SWT(wavelet=WAVELET)
-        coeffs = swt.decompose(signal, level=4)
+        coeffs = swt.decompose(signal, level=7)
 
         reconstructions = {}
         SWT_LEVEL = len(coeffs)
@@ -735,22 +735,14 @@ class PAFVisualizer:
 if __name__ == '__main__':
     path = Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/exp2/paf_new.h5")
     viz = PAFVisualizer(path, random_seed=43)
-    #42,43 seeds are good
-
-    epsilon_method = 'percentile'
-    epsilon_factor = 0.05
 
     indices = viz.get_random_indices(n_normal=1, n_preaf=1)
 
     idx_n   = indices['normal'][0]
     idx_p   = indices['preaf'][0]
 
-    output_dir = Path(__file__).parent.parent.parent / 'outputs' / 'paf_visualizations_3methods'
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     viz.investigate(idx_p)
     viz.investigate(idx_n)
-    subbands = ['D1', 'D2', 'D3', 'D4', 'A4']
 
     # for subband in subbands:
     #     viz.plot_utrp_feature_visibility(idx_p, subband_to_test=subband)

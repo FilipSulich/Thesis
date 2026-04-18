@@ -42,7 +42,7 @@ class DecompositionVisualizer:
             'D1': 47  # 32-64 Hz
         }
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
-        self.OUTPUT_DIR = '/data/outputs/experiment1_synthetic'
+        self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/exp1'
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
         self.reference_params = {}
