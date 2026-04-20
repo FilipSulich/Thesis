@@ -7,4 +7,5 @@ __pycache__
 *.h5
 /results
 /multi_resnet
+/data_final
 /outputs
