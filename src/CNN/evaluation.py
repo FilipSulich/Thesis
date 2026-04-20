@@ -512,10 +512,6 @@ def extract_rqa_from_rgb(utrp_rgb, epsilon_frac=0.1, lmin=2, vmin=2, size=64):
     binary = (blue >= threshold).astype(np.float32)
     return extract_rqa(binary, lmin=lmin, vmin=vmin)
 
-def rp_from_stored_utrp(utrp_rgb, epsilon_frac=0.1):
-    pass
-
-
 
 def extract_rqa_features(utrp):
     """
@@ -945,21 +941,3 @@ if __name__ == '__main__':
                   backbone=args.backbone, pretrained=args.pretrained)
     else:
         train_xgb(args.hdf5, args.split, args.arch, args.results_dir, args.seed)
-# #
-
-# with h5py.File('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/attention/utrp_new_denoise2.h5', 'r') as f:
-#     ss = f['single_scale/utrps'][0]  # (3, 256, 256)
-#
-# dist_proxy = 1.0 - ss[2]   # inverted blue channel
-# epsilon    = 0.1 * dist_proxy.max()
-# # binary     = (dist_proxy <= epsilon).astype(np.float32)
-# blue = ss[2]
-# threshold = np.percentile(blue[blue > 0], 90)  # top 10% = recurrent
-# binary = (blue >= threshold).astype(np.float32)
-# print(f"Threshold: {threshold:.4f}")
-# print(f"Binary fraction: {binary.mean():.4f}")  # should be ~0.10
-# print(f"Blue channel: min={ss[2].min():.4f} mean={ss[2].mean()} max={ss[2].max():.4f}")
-# print(f"dist_proxy:   min={dist_proxy.min():.4f}  max={dist_proxy.max():.4f}")
-# print(f"epsilon:      {epsilon:.4f}")
-# print(f"Binary fraction of 1s: {binary.mean():.4f}")
-# print(f"Expected ~0.10 for ε=10%")

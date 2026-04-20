@@ -1,11 +1,8 @@
 import json
-import multiprocessing
 import random
 import warnings
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import h5py
@@ -13,652 +10,162 @@ import numpy as np
 import pywt
 import wfdb
 from scipy import signal as sp_signal
-from tqdm import tqdm
+import os
+import sys
 
-from src.recurrence_plot.AMI import AMI
-from src.recurrence_plot.FNN import FNN
+from src.CNN.dataset.visualizer import UTRPVisualiser
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
-warnings.filterwarnings('ignore', category=FutureWarning, module='pywt')
+warnings.filterwarnings('ignore')
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
-DATA_DIR = Path('/data/paf')
+DATA_DIR        = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
+OUTPUT_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_final/utrp_dataset_db8_no_denoise')
 
-# ── Constants ──────────────────────────────────────────────────────────────────
-FS_ORIG          = 128
-FS_TARGET        = 256
-SEGMENT_SAMPLES  = FS_TARGET * 10   # 5000 samples = 10 seconds
-N_SEGMENTS       = 20
-UTRP_SIZE        = 256
-PAD_SAMPLES      = 5120             # next multiple of 2^10 above 5000
+FS_ORIG         = 128
+FS_TARGET       = 500
+SEGMENT_SAMPLES = FS_TARGET * 10
+N_SEGMENTS      = 15
+UTRP_SIZE       = 256
+PAD_SAMPLES     = 8192
 
-WAVELET          = 'db4'
-N_LEVELS         = 8               # covers down to 0.25 Hz at 500 Hz
-
-# Embedding parameters
-# Single-scale: τ=3 at 128 Hz = 23ms lag. At 500 Hz equivalent = τ=12
-# m=3 throughout — sufficient for ECG attractor dimensionality
-TAU_SINGLE = 3
-M_SINGLE   = 3
-
-# Subband decomposition — single level-10 SWT, select detail levels D1-D9
-USEFUL_LEVELS = [1, 2, 3, 4, 5, 6, 7]
-
-SUBBAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7']
-
-# Tau and M will be estimated once using AMI/FNN and fixed across all subbands
-# Will be loaded from JSON lookup file if it exists, otherwise estimated
-SUBBAND_TAU = {}
-SUBBAND_M = {}
-
-N_SUBSET_PER_CLASS = 30  # Number of records per class for tau/m estimation
+WAVELET         = 'db8'
+SUBBAND_LEVELS  = [2, 3, 4, 5, 6, 7, 8]
+N_LEVELS_SWT    = 10
+EPSILON_FRAC    = 0.10
 
 
-# ── Tau/M Parameter Estimation and Lookup ──────────────────────────────────────
 
-def load_tau_m_params(params_file: Path) -> Optional[Dict]:
-    """
-    Load tau/m parameters from JSON file if it exists.
-
-    Returns:
-        Dict with 'tau_single', 'm_single', 'subband_tau', 'subband_m'
-        where subband_tau/m are dicts mapping subband names to values
-        or None if file doesn't exist
-    """
-    if not params_file.exists():
-        return None
-
-    with open(params_file, 'r') as f:
-        params = json.load(f)
-
-    print(f"Loaded tau/m params from {params_file}")
-    print(f"  Single-scale: τ={params['tau_single']}, m={params['m_single']}")
-    print(f"  Subbands:")
-    for name in SUBBAND_NAMES:
-        if name in params['subband_tau']:
-            print(f"    {name}: τ={params['subband_tau'][name]}, m={params['subband_m'][name]}")
-
-    return params
+def _minmax(x: np.ndarray) -> np.ndarray:
+    lo, hi = x.min(), x.max()
+    return (x - lo) / (hi - lo + 1e-9)
 
 
-def save_tau_m_params(params: Dict, params_file: Path):
-    """Save tau/m parameters to JSON file."""
-    params_file.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(params_file, 'w') as f:
-        json.dump(params, f, indent=2)
-
-    print(f"Saved tau/m params to {params_file}")
-
-
-def estimate_global_tau_m(nsr_records: List[str],
-                          preaf_records: List[str],
-                          n_per_class: int = N_SUBSET_PER_CLASS,
-                          seed: int = 42) -> Dict:
-    """
-    Estimate tau/m for single-scale and for EACH subband (D1-D9) separately.
-
-    Strategy:
-      - Sample n_per_class from each class
-      - For each record, take middle segment
-      - Preprocess identically to full pipeline
-      - Run AMI/FNN on single-scale signal → tau_single, m_single
-      - Run AMI/FNN on EACH subband D1-D9 → tau/m per subband
-
-    Returns:
-        Dict with 'tau_single', 'm_single', 'subband_tau', 'subband_m'
-        where subband_tau/m are dicts mapping subband names to values
-    """
-    import random
-    rng = random.Random(seed)
-
-    nsr_sample = rng.sample(nsr_records, min(n_per_class, len(nsr_records)))
-    preaf_sample = rng.sample(preaf_records, min(n_per_class, len(preaf_records)))
-    all_sample = nsr_sample + preaf_sample
-
-    print(f"\nEstimating tau/m parameters on {len(all_sample)} records "
-          f"({len(nsr_sample)} NSR + {len(preaf_sample)} Pre-AF)...")
-
-    single_signals = []
-    subband_signals = {name: [] for name in SUBBAND_NAMES}
-
-    for rec_id in tqdm(all_sample, desc='Loading subset for tau/m estimation'):
-        try:
-            rec = wfdb.rdrecord(str(DATA_DIR / rec_id))
-            raw = rec.p_signal[:, 0].astype(np.float64)
-            n_tgt = int(len(raw) * FS_TARGET / FS_ORIG)
-            res = sp_signal.resample(raw, n_tgt)
-
-            # Middle segment
-            mid_start = max(0, (len(res) - SEGMENT_SAMPLES) // 2)
-            seg = res[mid_start:mid_start + SEGMENT_SAMPLES]
-            if len(seg) < SEGMENT_SAMPLES:
-                continue
-
-            # Preprocess
-            seg_norm = _minmax_norm(seg.astype(np.float32))
-            seg_pad = _pad(seg_norm)
-            # seg_den = np.clip(adaptive_wavelet_denoise(seg_pad)[:SEGMENT_SAMPLES],
-            #                  0.0, 1.0).astype(np.float32)
-
-            single_signals.append(seg_norm)
-
-            # Extract ALL subbands
-            subbands = extract_subbands(seg_pad)
-            for name in SUBBAND_NAMES:
-                if name in subbands:
-                    subband_signals[name].append(subbands[name][:SEGMENT_SAMPLES])
-
-        except Exception as e:
-            print(f"  [WARN] {rec_id}: {e}")
-            continue
-
-    # Estimate single-scale tau/m
-    print(f"\n→ Estimating single-scale tau/m ({len(single_signals)} signals):")
-    tau_s, m_s = _estimate_tau_m_for_signals(single_signals)
-
-    # Estimate tau/m for each subband separately
-    subband_tau = {}
-    subband_m = {}
-
-    print(f"\n→ Estimating tau/m for each subband:")
-    for name in SUBBAND_NAMES:
-        signals = subband_signals[name]
-        if len(signals) > 0:
-            print(f"  {name} ({len(signals)} signals):")
-            tau, m = _estimate_tau_m_for_signals(signals)
-            subband_tau[name] = tau
-            subband_m[name] = m
-        else:
-            print(f"  {name}: No signals, using default τ=12, m=3")
-            subband_tau[name] = 12
-            subband_m[name] = 3
-
-    result = {
-        'tau_single': tau_s,
-        'm_single': m_s,
-        'subband_tau': subband_tau,
-        'subband_m': subband_m,
-    }
-
-    print(f"\nFinal tau/m estimates:")
-    print(f"  Single-scale: τ={tau_s}, m={m_s}")
-    print(f"  Subbands:")
-    for name in SUBBAND_NAMES:
-        print(f"    {name}: τ={subband_tau[name]}, m={subband_m[name]}")
-
-    return result
-
-
-def _estimate_tau_m_for_signals(signals: List[np.ndarray]) -> Tuple[int, int]:
-    """Estimate tau and m for a list of signals using AMI/FNN."""
-    taus, dims = [], []
-
-    for sig in tqdm(signals, desc='  AMI/FNN', leave=False):
-        tau, m = _get_optimal_parameters(sig)
-        taus.append(tau)
-        dims.append(m)
-
-    tau_med = int(np.median(taus))
-    m_med = int(np.median(dims))
-
-    print(f"    τ values: min={min(taus)}, median={tau_med}, max={max(taus)}")
-    print(f"    m values: min={min(dims)}, median={m_med}, max={max(dims)}")
-
-    return tau_med, m_med
-
-
-def _get_optimal_parameters(signal: np.ndarray) -> Tuple[int, int]:
-    """Estimate tau and m for a single signal using AMI and FNN."""
-    N = len(signal)
-    if N < 10:
-        return 1, 1
-
-    tau_candidate = AMI(signal=signal).get_first_minimum()
-
-    if tau_candidate is None:
-        tau = max(1, N // 100)
-    else:
-        tau = int(tau_candidate)
-
-    try:
-        max_m = max(2, N // (tau if tau > 0 else 1))
-        m_obj = FNN(tau=tau, signal=signal)
-        m = m_obj.get_optimal_dimension()
-
-        if m >= max_m:
-            m = max(1, max_m - 1)
-    except Exception as e:
-        print(f"  Warning: FNN failed ({e}), using fallback m=2")
-        m = 2
-
-    return tau, m
-
-
-def _minmax_norm(seg: np.ndarray) -> np.ndarray:
-    """Min-max normalise to [0,1]."""
-    s_min, s_max = seg.min(), seg.max()
-    return (seg - s_min) / (s_max - s_min + 1e-9)
-
-
-def _pad(seg: np.ndarray) -> np.ndarray:
-    """Reflect-pad to PAD_SAMPLES for level-10 SWT."""
-    pad = PAD_SAMPLES - len(seg)
+def _pad(x: np.ndarray) -> np.ndarray:
+    pad = PAD_SAMPLES - len(x)
     if pad <= 0:
-        return seg[:PAD_SAMPLES]
-    return np.pad(seg, (0, pad), mode='reflect')
+        return x[:PAD_SAMPLES]
+    return np.pad(x, (0, pad), mode='reflect')
 
 
-def pad_to_dyadic_length(signal: np.ndarray, min_length: int = None) -> Tuple[np.ndarray, int]:
-    """
-    Pad signal to dyadic length (power of 2).
-    
-    Args:
-        signal: Input signal (1D)
-        min_length: Minimum length after padding (default: use signal length)
-    
-    Returns:
-        (padded_signal, pad_length) tuple
-    """
-    if min_length is None:
-        min_length = len(signal)
-    
-    # Find next power of 2 >= max(len(signal), min_length)
-    target_length = max(len(signal), min_length)
-    dyadic_length = 2 ** int(np.ceil(np.log2(target_length)))
-    
-    pad_amount = dyadic_length - len(signal)
-    if pad_amount <= 0:
-        return signal[:dyadic_length], 0
-    
-    padded = np.pad(signal, (0, pad_amount), mode='reflect')
-    return padded, pad_amount
+def extract_subbands_no_denoise(
+        signal_padded: np.ndarray,
+        wavelet: str = WAVELET,
+        n_levels: int = N_LEVELS_SWT,
+        subband_levels: List[int] = SUBBAND_LEVELS,
+) -> Dict[str, np.ndarray]:
+    coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
+    n_lvls = len(coeffs)
+    subbands: Dict[str, np.ndarray] = {}
 
-
-def extract_subbands_swt(signal: np.ndarray, wavelet: str, level: int, 
-                        target_length: int = None, pad_mode: str = 'reflect') -> Dict[str, np.ndarray]:
-    """
-    Extract subbands from signal using SWT (Stationary Wavelet Transform) reconstruction.
-    
-    Procedure:
-      1. Pad signal to dyadic length (or target_length if specified)
-      2. Perform SWT decomposition at specified level
-      3. Reconstruct each subband by zeroing all levels except target
-      4. Return subband dict
-    
-    Args:
-        signal: Input signal (1D numpy array, float32)
-        wavelet: Wavelet name (e.g., 'db4', 'db5', 'sym4')
-        level: Decomposition level (1-10 typical)
-        target_length: Length after padding. If None, pads to dyadic length of signal
-        pad_mode: Padding mode ('reflect', 'edge', 'wrap', etc.)
-    
-    Returns:
-        Dict mapping subband names ('D1', 'D2', ..., f'D{level}') to (target_length,) float32 arrays
-    
-    Example:
-        >>> signal = np.random.randn(5000)
-        >>> subbands = extract_subbands_swt(signal, wavelet='db4', level=7)
-        >>> print(subbands.keys())  # dict_keys(['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'])
-    """
-    # Step 1: Pad to dyadic length
-    if target_length is None:
-        padded_signal, _ = pad_to_dyadic_length(signal)
-        target_length = len(padded_signal)
-    else:
-        # Pad to specified length
-        pad_amount = target_length - len(signal)
-        if pad_amount <= 0:
-            padded_signal = signal[:target_length]
-        else:
-            padded_signal = np.pad(signal, (0, pad_amount), mode=pad_mode)
-    
-    padded_signal = padded_signal.astype(np.float32)
-    
-    # Step 2: SWT decomposition
-    coeffs = pywt.swt(padded_signal, wavelet, level=level)
-    n_levels = len(coeffs)
-    
-    subbands = {}
-    
-    # Step 3: Reconstruct each subband
-    for target_level in range(1, level + 1):
-        # SWT returns coeffs from coarse to fine: (cA_n, cD_n), ..., (cA_1, cD_1)
-        # So target_level=1 is the finest (last in list)
-        target_idx = n_levels - target_level
-        
-        # Zero all coefficients except target
-        zeroed_coeffs = []
-        for j, (cA, cD) in enumerate(coeffs):
-            if j == target_idx:
-                # Keep this level's detail coefficients
-                zeroed_coeffs.append((np.zeros_like(cA), cD))
-            else:
-                # Zero out all others
-                zeroed_coeffs.append((np.zeros_like(cA), np.zeros_like(cD)))
-        
-        # Reconstruct
-        subband = pywt.iswt(zeroed_coeffs, wavelet)[:target_length].astype(np.float32)
-        subbands[f'D{target_level}'] = subband
-    
-    return subbands
-
-
-
-def adaptive_wavelet_denoise(signal: np.ndarray) -> np.ndarray:
-    """
-    Adaptive wavelet denoising (Donoho & Johnstone 1994).
-    Soft thresholding with MAD noise estimator per level.
-    """
-    coeffs   = pywt.swt(signal, WAVELET, level=N_LEVELS)
-    denoised = []
-    for cA, cD in coeffs:
-        delta  = np.median(np.abs(cD)) / 0.6745
-        T      = delta * np.sqrt(2.0 * np.log(N_LEVELS))
-        cD_den = np.sign(cD) * np.maximum(np.abs(cD) - T, 0.0)
-        denoised.append((cA, cD_den))
-    return pywt.iswt(denoised, WAVELET)
-
-
-def extract_subbands(signal_padded: np.ndarray) -> Dict[str, np.ndarray]:
-    coeffs   = pywt.swt(signal_padded, WAVELET, level=N_LEVELS)
-    n_levels = len(coeffs)
-    subbands = {}
-
-    for target_level in USEFUL_LEVELS:
-        target_idx = n_levels - target_level
-        zeroed = []
-        for j, (cA, cD) in enumerate(coeffs):
-            if j == target_idx:
-                zeroed.append((np.zeros_like(cA), cD))
-            else:
-                zeroed.append((np.zeros_like(cA), np.zeros_like(cD)))
-
-        sub = pywt.iswt(zeroed, WAVELET)[:SEGMENT_SAMPLES].astype(np.float32)
-
-        # Min-max normalise the subband — same as single-scale signal preprocessing
-        # This makes each subband's distance matrix comparable in scale to single-scale
-        sub = _minmax_norm(sub)
-
-        subbands[f'D{target_level}'] = sub
+    for level in subband_levels:
+        target_idx = n_lvls - level
+        zeroed = [
+            ((np.zeros_like(cA), cD) if j == target_idx
+             else (np.zeros_like(cA), np.zeros_like(cD)))
+            for j, (cA, cD) in enumerate(coeffs)
+        ]
+        sub = pywt.iswt(zeroed, wavelet)[:SEGMENT_SAMPLES].astype(np.float32)
+        subbands[f'D{level}'] = _minmax(sub)
 
     return subbands
 
-def compute_distance_matrix(signal: np.ndarray, tau: int, m: int) -> np.ndarray:
-    rp = RecurrencePlotGenerator(signal[:SEGMENT_SAMPLES], tau, m, epsilon=0)
-    utrp = rp.compute_rp_unthresholded()
-    return utrp
 
-
-def create_binary_rp(signal, tau, m, output_size=256):
-    sig = signal[:SEGMENT_SAMPLES]
-    n = len(sig) - (m - 1) * tau
-    if n <= 0:
-        return np.zeros((3, output_size, output_size), dtype=np.float32)
-
-    embedded = np.array([sig[i:i + m * tau:tau] for i in range(n)])
-    diff = embedded[:, np.newaxis, :] - embedded[np.newaxis, :, :]
-    distances = np.sqrt(np.sum(diff ** 2, axis=2)).astype(np.float32)
-
-    # Binary threshold: ε = 10% of max distance
-    epsilon = 0.1 * distances.max()
-    binary = (distances < epsilon).astype(np.float32)
-
-    binary_r = cv2.resize(binary, (output_size, output_size),
-                          interpolation=cv2.INTER_LINEAR).astype(np.float32)
-    np.fill_diagonal(binary_r, 0.0)
-
-    # JET colourmap on binary image
-    u8 = (binary_r * 255).astype(np.uint8)
-    bgr = cv2.applyColorMap(u8, cv2.COLORMAP_JET)
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    return rgb.transpose(2, 0, 1)
-
-def create_utrp(signal: np.ndarray, tau: int, m: int, output_size: int = UTRP_SIZE):
+def denoise_and_extract_subbands(
+        signal_padded: np.ndarray,
+        wavelet: str = WAVELET,
+        n_levels: int = N_LEVELS_SWT,
+        subband_levels: List[int] = SUBBAND_LEVELS,
+) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     """
-    Raw distance matrix → RGB image.
-    Normalises by this segment's own max distance so the full
-    colour range is used. No clipping, no global constants.
-    """
-    sig = signal[:SEGMENT_SAMPLES]
-    n   = len(sig) - (m - 1) * tau
-    if n <= 0:
-        return np.zeros((3, output_size, output_size), dtype=np.float32)
-
-    embedded  = np.array([sig[i:i + m * tau:tau] for i in range(n)])
-    diff      = embedded[:, np.newaxis, :] - embedded[np.newaxis, :, :]
-    distances = np.sqrt(np.sum(diff ** 2, axis=2)).astype(np.float32)
-
-    # Normalise by max so full JET range is used — no clipping
-    d_max = distances.max()
-    if d_max > 1e-9:
-        distances = distances / d_max
-
-    # Resize
-    dist_r = cv2.resize(distances, (output_size, output_size), interpolation=cv2.INTER_LINEAR).astype(np.float32)
-
-    np.fill_diagonal(dist_r, 0.0)
-
-    # Convert to RGB
-    u8 = (dist_r * 255).astype(np.uint8)
-    bgr = cv2.applyColorMap(u8, cv2.COLORMAP_JET)
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-
-    # Return both the RGB image and the raw resized distance matrix
-    return rgb.transpose(2, 0, 1), dist_r  # (3, H, W), (H, W)
-
-
-@dataclass
-class ZhuSample:
-    single_scale_utrp: np.ndarray   # (3, 256, 256) float32 RGB
-    single_scale_dist: np.ndarray   # (256, 256) float32 raw distance matrix (resized)
-    multi_scale_utrp:  np.ndarray   # (9, 3, 256, 256) float32 RGB — D1-D9
-    label:             int
-    record_id:         str
-    segment_idx:       int
-    time_to_onset:     float
-
-
-def get_time_to_onset(record_id: str, segment_idx: int) -> float:
-    import re
-    match = re.match(r'p(\d+)', record_id)
-    if match:
-        num = int(match.group(1))
-        if num % 2 == 1:
-            max_start     = 30 * 60 * FS_TARGET - SEGMENT_SAMPLES
-            starts        = np.linspace(0, max_start, N_SEGMENTS, dtype=int)
-            seg_start_sec = starts[segment_idx] / FS_TARGET
-            return float(30 * 60 - seg_start_sec)
-        else:
-            return float(45 * 60)
-    return float('nan')
-
-
-def denoise_and_extract_subbands(signal_padded: np.ndarray) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
-    """
-    Single SWT decomposition that simultaneously denoises and extracts subbands.
+    Single SWT call: denoise signal and reconstruct per-level subbands.
 
     Steps:
-      1. SWT decomposition of normalised+padded signal
-      2. Soft threshold ALL detail coefficients (denoising)
-      3. Reconstruct full denoised signal from all thresholded coefficients
-      4. Reconstruct each subband by zeroing all levels except the target
-         (using already-thresholded coefficients — no separate denoising pass)
+      1. SWT decomposition
+      2. Soft-threshold all detail coefficients (Donoho & Johnstone 1994)
+         threshold T = MAD/0.6745 * sqrt(2 * log(N))
+         where N = log2(fs / f_low) = log2(500/0.5) ≈ 10
+      3. Reconstruct full denoised signal from thresholded coefficients
+      4. Reconstruct each subband by zeroing all levels except target
+         (uses already-thresholded coefficients — no second denoising pass)
 
     Returns:
-      denoised: (SEGMENT_SAMPLES,) float32 — full denoised signal
-      subbands: dict {name: (SEGMENT_SAMPLES,) float32} — denoised subband signals
+        denoised:  (SEGMENT_SAMPLES,) float32
+        subbands:  {'D2': ..., 'D3': ..., ...} each (SEGMENT_SAMPLES,) float32,
+                   min-max normalised
     """
-    coeffs = pywt.swt(signal_padded, WAVELET, level=N_LEVELS)
+    import math
+    coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
 
-    # Step 1: Soft threshold all detail coefficients
-    fs = 500
-    fl = 0.5
+    N_log = math.log2(FS_TARGET / 0.5)          # Donoho level count
     denoised_coeffs = []
     for cA, cD in coeffs:
-        delta = np.median(np.abs(cD)) / 0.6745
+        sigma = np.median(np.abs(cD)) / 0.6745
+        T     = sigma * math.sqrt(2.0 * math.log(N_log))
+        cD_d  = np.sign(cD) * np.maximum(np.abs(cD) - T, 0.0)
+        denoised_coeffs.append((cA, cD_d))
 
-        N = np.log2(fs/fl)
+    denoised = pywt.iswt(denoised_coeffs, wavelet)[:SEGMENT_SAMPLES].astype(np.float32)
 
-        T = delta * np.sqrt(2.0 * np.log(N))
+    n_lvls = len(denoised_coeffs)
+    subbands: Dict[str, np.ndarray] = {}
 
-        # T_old = delta * np.sqrt(2.0 * np.log(N_LEVELS))
-
-
-        cD_den = np.sign(cD) * np.maximum(np.abs(cD) - T, 0.0)
-
-        # cD_den_old = np.sign(cD) * np.maximum(np.abs(cD) - T_old, 0.0)
-
-        # print("new")
-        # print(T, cD_den)
-        # print("")
-        # print("old")
-        # print(T_old, cD_den_old)
-
-        denoised_coeffs.append((cA, cD_den))
-
-    # Step 2: Reconstruct full denoised signal
-    # denoised = np.clip(
-    #     pywt.iswt(denoised_coeffs, WAVELET)[:SEGMENT_SAMPLES],
-    #     0.0, 1.0
-    # ).astype(np.float32)
-
-    denoised = pywt.iswt(denoised_coeffs, WAVELET)[:SEGMENT_SAMPLES].astype(np.float32)
-
-    # Step 3: Reconstruct each subband from denoised coefficients
-    # Zero all levels except target — uses already-thresholded cD
-    n_levels = len(coeffs)
-    # n_levels = len(denoised_coeffs)
-    subbands = {}
-
-    for target_level in USEFUL_LEVELS:
-        target_idx = n_levels - target_level
-        zeroed = []
-        # for j, (cA, cD) in enumerate(denoised_coeffs):
-        for j, (cA, cD) in enumerate(coeffs):
-            if j == target_idx:
-                zeroed.append((np.zeros_like(cA), cD))  # keep denoised cD
-            else:
-                zeroed.append((np.zeros_like(cA), np.zeros_like(cD)))
-
-        sub = pywt.iswt(zeroed, WAVELET)[:SEGMENT_SAMPLES].astype(np.float32)
-        # sub = _minmax_norm(sub)
-        subbands[f'D{target_level}'] = sub
+    for level in subband_levels:
+        target_idx = n_lvls - level
+        zeroed = [
+            ((np.zeros_like(cA), cD) if j == target_idx
+             else (np.zeros_like(cA), np.zeros_like(cD)))
+            for j, (cA, cD) in enumerate(denoised_coeffs)
+        ]
+        sub = pywt.iswt(zeroed, wavelet)[:SEGMENT_SAMPLES].astype(np.float32)
+        subbands[f'D{level}'] = _minmax(sub)
 
     return denoised, subbands
-    # return signal_padded, subbands
 
-def process_segment(args: Tuple) -> Optional[ZhuSample]:
-    (record_id, label, segment_idx, tau_single, m_single, subband_tau, subband_m) = args
+def compute_utrp(signal: np.ndarray, tau: int, m: int,
+                 size: int = UTRP_SIZE) -> Optional[np.ndarray]:
     try:
-        rec = wfdb.rdrecord(str(DATA_DIR / record_id))
-        raw = rec.p_signal[:, 0].astype(np.float64)
-
-        n_tgt = int(len(raw) * FS_TARGET / FS_ORIG)
-        res   = sp_signal.resample(raw, n_tgt)
-
-        max_start = len(res) - SEGMENT_SAMPLES
-        if max_start <= 0:
-            return None
-        starts = np.linspace(0, max_start, N_SEGMENTS, dtype=int)
-        seg    = res[starts[segment_idx]:starts[segment_idx] + SEGMENT_SAMPLES]
-
-        if len(seg) < SEGMENT_SAMPLES:
-            return None
-
-        seg_norm = _minmax_norm(seg.astype(np.float32))
-        seg_pad = _pad(seg_norm)
-
-        seg_den, subbands = denoise_and_extract_subbands(seg_pad)
-
-        # create_utrp now returns (rgb, dist_r)
-        ss_utrp, ss_dist = create_utrp(seg_den, tau_single, m_single, UTRP_SIZE)
-        # ss_utrp, ss_dist = create_utrp(seg_norm, tau_single, m_single, UTRP_SIZE)
-
-        # Subband RPs
-        ms_channels = []
-        for name in SUBBAND_NAMES:
-            # For subbands we only need the RGB images for the model; discard raw dist
-            rgb, _ = create_utrp(subbands[name], subband_tau[name], subband_m[name], UTRP_SIZE)
-            ms_channels.append(rgb)
-
-        ms_utrp = np.stack(ms_channels, axis=0).reshape(-1, UTRP_SIZE, UTRP_SIZE)
-
-        return ZhuSample(
-            single_scale_utrp=ss_utrp,
-            single_scale_dist=ss_dist,
-            multi_scale_utrp=ms_utrp,
-            label=label,
-            record_id=record_id,
-            segment_idx=segment_idx,
-            time_to_onset=get_time_to_onset(record_id, segment_idx),
-        )
-
-    except Exception as e:
-        print(f"[WARN] {record_id} seg {segment_idx}: {e}")
-        return None
-
-def process_segment_paper(args: Tuple) -> Optional[np.ndarray]:
-    """Process segment with NO pre-UTRP normalization (paper pipeline)."""
-    (record_id, label, segment_idx, tau, m) = args
-    try:
-        rec = wfdb.rdrecord(str(DATA_DIR / record_id))
-        raw = rec.p_signal[:, 0].astype(np.float64)
-        
-        # Resample to target FS
-        n_tgt = int(len(raw) * FS_TARGET / FS_ORIG)
-        res = sp_signal.resample(raw, n_tgt)
-        
-        # Extract segment
-        max_start = len(res) - SEGMENT_SAMPLES
-        if max_start <= 0:
-            return None
-        starts = np.linspace(0, max_start, N_SEGMENTS, dtype=int)
-        seg = res[starts[segment_idx]:starts[segment_idx] + SEGMENT_SAMPLES]
-        
-        if len(seg) < SEGMENT_SAMPLES:
-            return None
-        
-        # NO normalization — use raw resampled signal
-        seg_raw = seg.astype(np.float32)
-        
-        # Generate UTRP from raw signal (helper)
-        sig = seg_raw[:SEGMENT_SAMPLES]
-        n = len(sig) - (m - 1) * tau
+        sig = signal[:SEGMENT_SAMPLES].astype(np.float32)
+        n   = len(sig) - (m - 1) * tau
         if n <= 0:
-            return None
-        
-        # Embed signal
-        embedded = np.array([sig[i:i + m * tau:tau] for i in range(n)])
-        diff = embedded[:, np.newaxis, :] - embedded[np.newaxis, :, :]
-        distances = np.sqrt(np.sum(diff ** 2, axis=2)).astype(np.float32)
-        
-        # Normalize to 0-1 range
-        d_max = distances.max()
+            return np.zeros((3, size, size), dtype=np.float32)
+
+        gen = RecurrencePlotGenerator(
+            signal=sig, time_delay=tau, embedding_dim=m, epsilon=0
+        )
+        rp = gen.compute_rp_unthresholded()
+
+        d_max = rp.max()
         if d_max > 1e-9:
-            distances = distances / d_max
-        
-        # Resize to 224x224
-        dist_r = cv2.resize(distances, (224, 224), 
-                           interpolation=cv2.INTER_LINEAR).astype(np.float32)
-        
-        # Zero diagonal
-        np.fill_diagonal(dist_r, 0.0)
-        
-        # Convert to RGB (JET colormap)
-        u8 = (dist_r * 255).astype(np.uint8)
+            rp = rp / d_max
+
+        rp_r = cv2.resize(rp.astype(np.float32), (size, size),
+                          interpolation=cv2.INTER_LINEAR)
+        np.fill_diagonal(rp_r, 0.0)
+
+        u8  = (rp_r * 255).astype(np.uint8)
         bgr = cv2.applyColorMap(u8, cv2.COLORMAP_JET)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        
-        return rgb.transpose(2, 0, 1)  # (3, H, W)
+        return rgb.transpose(2, 0, 1)
+
     except Exception as e:
-        print(f"[WARN] {record_id} seg {segment_idx}: {e}")
+        print(f"    [ERROR] compute_utrp: {e}")
         return None
 
-def build_subject_groups(preaf_records, nsr_records):
-    subjects  = []
-    preaf_set = set(preaf_records)
+
+def build_subject_groups(nsr_records: List[str],
+                          preaf_records: List[str]) -> List[Tuple]:
+    """
+    Group paired records by patient before splitting.
+
+    NSR:   (n01, n01c) → one subject group
+    PreAF: (p01, p02)  → one subject group (paired odd/even)
+    """
     nsr_set   = set(nsr_records)
+    preaf_set = set(preaf_records)
+    subjects  = []
 
     for i in range(1, 51):
         recs = [r for r in [f'n{i:02d}', f'n{i:02d}c'] if r in nsr_set]
@@ -672,322 +179,271 @@ def build_subject_groups(preaf_records, nsr_records):
 
     return subjects
 
-def split_subjects_721(subjects, seed=42):
-    rng = random.Random(seed)
 
-    preaf_subj = [s for s in subjects if s[2] == 1]
-    nsr_subj   = [s for s in subjects if s[2] == 0]
-    rng.shuffle(preaf_subj); rng.shuffle(nsr_subj)
+def split_subjects_721(subjects: List[Tuple],
+                        seed: int = 42) -> Dict[str, List[str]]:
+    rng     = random.Random(seed)
+    preaf_s = [s for s in subjects if s[2] == 1]
+    nsr_s   = [s for s in subjects if s[2] == 0]
+    rng.shuffle(preaf_s); rng.shuffle(nsr_s)
 
-    def split(lst):
+    def _split(lst):
         n      = len(lst)
         n_test = max(1, round(n * 0.1))
         n_val  = max(1, round(n * 0.2))
         return lst[n_test+n_val:], lst[n_test:n_test+n_val], lst[:n_test]
 
-    pa_tr, pa_va, pa_te = split(preaf_subj)
-    ns_tr, ns_va, ns_te = split(nsr_subj)
+    pa_tr, pa_va, pa_te = _split(preaf_s)
+    ns_tr, ns_va, ns_te = _split(nsr_s)
 
-    def extract(subj_list):
+    def _extract(subj_list):
         recs = []
         for _, rs, _ in subj_list:
             recs.extend(rs)
         return sorted(recs)
 
     return {
-        'train': extract(pa_tr + ns_tr),
-        'val':   extract(pa_va + ns_va),
-        'test':  extract(pa_te + ns_te),
+        'train': _extract(pa_tr + ns_tr),
+        'val':   _extract(pa_va + ns_va),
+        'test':  _extract(pa_te + ns_te),
     }
 
-class ZhuDatasetGenerator:
-    def generate(self, output_path: Path, seed: int = 42) -> None:
-        global TAU_SINGLE, M_SINGLE, SUBBAND_TAU, SUBBAND_M
+class DatasetGenerator:
+    KEYS = ['single'] + [f'D{l}' for l in SUBBAND_LEVELS]
 
-        nsr_records   = ([f'n{i:02d}'  for i in range(1, 51)] + [f'n{i:02d}c' for i in range(1, 51)])
+    def __init__(self, output_dir: Path = OUTPUT_DIR,
+                 wavelet: str = WAVELET):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.wavelet    = wavelet
 
-        preaf_records = [f'p{i:02d}' for i in range(1, 51)]
+    def _load_signal(self, record_id: str) -> Optional[np.ndarray]:
+        try:
+            rec = wfdb.rdrecord(str(DATA_DIR / record_id))
+            raw = rec.p_signal[:, 0].astype(np.float64)
+            n   = int(len(raw) * FS_TARGET / FS_ORIG)
+            return sp_signal.resample(raw, n).astype(np.float32)
+        except Exception as e:
+            print(f"  [ERROR] {record_id}: {e}")
+            return None
 
-        all_records = ([(r, 0) for r in nsr_records] + [(r, 1) for r in preaf_records])
+    def _extract_segments(self, signal: np.ndarray) -> List[np.ndarray]:
+        max_start = len(signal) - SEGMENT_SAMPLES
+        if max_start <= 0:
+            return []
+        starts = np.linspace(0, max_start, N_SEGMENTS, dtype=int)
+        segs   = []
+        for s in starts:
+            seg = signal[s:s + SEGMENT_SAMPLES]
+            if len(seg) < SEGMENT_SAMPLES:
+                continue
+            segs.append(_minmax(seg.astype(np.float32)))
+        return segs
 
-        print(f"Records: {len(all_records)} "f"(Learning: NSR={len(nsr_records)}, Pre-AF={len(preaf_records)}) ")
+    def _get_time_to_onset(self, record_id: str, segment_idx: int) -> float:
+        if not record_id.startswith('p'):
+            return -1.0
 
-        # ── Load or estimate tau/m parameters ──────────────────────────────
-        params_file = output_path.parent / 'tau_m_params.json'
-        params = load_tau_m_params(params_file)
+        import re
+        match = re.match(r'p(\d+)', record_id)
+        if not match:
+            return -1.0
 
-        if params is None:
-            print("\nNo tau/m params found, estimating from data...")
-            params = estimate_global_tau_m(nsr_records, preaf_records, seed=seed)
-            save_tau_m_params(params, params_file)
+        num = int(match.group(1))
 
-        # Set global parameters
-        TAU_SINGLE = params['tau_single']
-        M_SINGLE = params['m_single']
+        if num % 2 == 0:
+            return 45
 
-        # Use per-subband tau/m values
-        SUBBAND_TAU = params['subband_tau']
-        SUBBAND_M = params['subband_m']
+        # p-odd: 30-min pre-AF recording ending at onset
+        max_start = FS_TARGET * 30 * 60 - SEGMENT_SAMPLES
+        starts = np.linspace(0, max_start, N_SEGMENTS, dtype=int)
+        seg_start_sec = starts[segment_idx] / FS_TARGET
+        return float(30 * 60 - seg_start_sec)
 
-        print(f"\nUsing parameters:")
-        print(f"  Single-scale: τ={TAU_SINGLE}, m={M_SINGLE}")
-        print(f"  Subbands:")
-        for name in SUBBAND_NAMES:
-            print(f"    {name}: τ={SUBBAND_TAU[name]}, m={SUBBAND_M[name]}")
+    def _process_record(self, record_id: str, label: int,tau_single: int, m_single: int,subband_tau: Dict, subband_m: Dict) -> List[Dict]:
+        signal = self._load_signal(record_id)
+        if signal is None:
+            return []
 
-        #
-        # Split
-        subjects = build_subject_groups(preaf_records, nsr_records)
-        split    = split_subjects_721(subjects, seed=seed)
+        segments = self._extract_segments(signal)
+        if not segments:
+            print(f"  [WARN] No segments: {record_id}")
+            return []
 
-        nsr_set   = set(nsr_records)
-        preaf_set = set(preaf_records)
-        for name in ('train', 'val', 'test'):
-            recs    = split[name]
-            n_nsr   = sum(1 for r in recs if r in nsr_set)
-            n_preaf = sum(1 for r in recs if r in preaf_set)
-            print(f"  {name:5s}: {len(recs)} records "
-                  f"(NSR={n_nsr} Pre-AF={n_preaf}) "
-                  f"→ ~{len(recs)*N_SEGMENTS} segments")
+        results = []
+        for seg_idx, seg in enumerate(segments):
+            seg_pad = _pad(seg)
 
-        split_out = {
-            **split,
-            'seed':               seed,
-            'segments_per_record': N_SEGMENTS,
-            'tau_single':         TAU_SINGLE,
-            'm_single':           M_SINGLE,
-            'subband_tau':        SUBBAND_TAU,
-            'subband_m':          SUBBAND_M,
-            'subband_names':      SUBBAND_NAMES,
-            # 'global_scales':      scales,
-            'note': ('Subject-level 7:2:1 split. Global distance scales '
-                     'estimated from median p95 across 60 sampled records.'),
-        }
+            # Multi-scale: extract subbands WITHOUT denoising
+            subbands_multi = extract_subbands_no_denoise(
+                seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
+            )
+            
+            # Single-scale: denoise and get full reconstruction
+            # seg_den, _ = denoise_and_extract_subbands(
+            #     seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
+            # )
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        split_path = output_path.with_suffix('.split.json')
-        with open(split_path, 'w') as f:
-            json.dump(split_out, f, indent=2)
-        print(f"\nSplit + scales saved → {split_path}")
+            images: Dict[str, np.ndarray] = {}
+            min_max_seg = _minmax(seg)
 
-        # Build tasks (include tau/m params for multiprocessing)
-        tasks = [
-            (rec_id, label, seg_idx, TAU_SINGLE, M_SINGLE, SUBBAND_TAU, SUBBAND_M)
-            for rec_id, label in all_records
-            for seg_idx in range(N_SEGMENTS)
-        ]
-        print(f"Total tasks: {len(tasks)}")
+            # Single-scale UTRP from denoised signal
+            # single_utrp = compute_utrp(seg_den, tau_single, m_single)
+            single_utrp = compute_utrp(min_max_seg, tau_single, m_single)
 
-        # Process
-        n_workers = min(multiprocessing.cpu_count(), 8)
-        samples: List[ZhuSample] = []
-        with ProcessPoolExecutor(max_workers=n_workers) as ex:
-            futures = {ex.submit(process_segment, t): t for t in tasks}
-            for fut in tqdm(as_completed(futures), total=len(tasks),
-                            desc='Generating UTRPs'):
-                r = fut.result()
-                if r is not None:
-                    samples.append(r)
+            if single_utrp is None:
+                continue  # Skip this segment if UTRP computation failed
+            images['single'] = single_utrp
 
-        print(f"Processed {len(samples)}/{len(tasks)} segments")
+            # Multi-scale UTRPs (D2-D8) from undenoised subbands
+            skip_segment = False
+            for level in SUBBAND_LEVELS:
+                name = f'D{level}'
+                tau  = subband_tau.get(name, 3)
+                m    = subband_m.get(name, 3)
+                sub_utrp = compute_utrp(subbands_multi[name], tau, m)
+                if sub_utrp is None:
+                    skip_segment = True
+                    break
+                images[name] = sub_utrp
+            
+            if skip_segment:
+                continue  # Skip segment if any subband UTRP failed
 
-        self._save_hdf5(samples, output_path,  split_out)
-
-    def _save_hdf5(self, samples: List[ZhuSample], path: Path, split_info: dict) -> None:
-        print(f"\nSaving → {path}")
-
-        ss    = np.stack([s.single_scale_utrp for s in samples])
-        sd    = np.stack([s.single_scale_dist for s in samples])
-        ms    = np.stack([s.multi_scale_utrp  for s in samples])
-        lbls  = np.array([s.label             for s in samples], dtype=np.int8)
-        rids  = np.array([s.record_id.encode() for s in samples], dtype='S16')
-        sidxs = np.array([s.segment_idx       for s in samples], dtype=np.int16)
-        t2os  = np.array([s.time_to_onset     for s in samples], dtype=np.float32)
-
-        with h5py.File(path, 'w') as f:
-            grp = f.create_group('single_scale')
-            grp.create_dataset('utrps', data=ss, dtype=np.float32, compression='gzip', compression_opts=4)
-            grp.create_dataset('distances', data=sd, dtype=np.float32, compression='gzip', compression_opts=4)
-
-            f.create_group('multi_scale').create_dataset('utrps', data=ms, dtype=np.float32, compression='gzip', compression_opts=4)
-
-            meta = f.create_group('metadata')
-            meta.create_dataset('labels',          data=lbls)
-            meta.create_dataset('record_ids',      data=rids)
-            meta.create_dataset('segment_indices', data=sidxs)
-            meta.create_dataset('time_to_onset',   data=t2os)
-
-            f.attrs.update({
-                'n_samples':             len(samples),
-                'n_preaf':               int((lbls == 1).sum()),
-                'n_nsr':                 int((lbls == 0).sum()),
-                'utrp_size':             UTRP_SIZE,
-                'tau_single':            TAU_SINGLE,
-                'm_single':              M_SINGLE,
-                'subband_names':         ','.join(SUBBAND_NAMES),
-                'fs_target':             FS_TARGET,
-                'segment_samples':       SEGMENT_SAMPLES,
-                'n_segments_per_record': N_SEGMENTS,
-                'normalisation':         'global_median_p95',
+            results.append({
+                'record_id':   record_id,
+                'segment_idx': seg_idx,
+                'label':       label,
+                'time_to_onset_min': self._get_time_to_onset(record_id, seg_idx),
+                'images':      images,
             })
 
-        print(f"Saved {len(samples)} — "f"Pre-AF={int((lbls==1).sum())}  NSR={int((lbls==0).sum())}")
-        print(f"Single-scale: {ss.shape}  Multi-scale: {ms.shape}")
+        print(f"    {record_id}  label={label}  {len(results)} segments")
+        return results
 
-    def generate_utrp_paper_pipeline(self, output_path: Path, seed: int = 42) -> None:
-        """
-        Generate UTRPs following the paper's exact pipeline:
-        1. NO signal normalization (use raw ECG after resampling and optional denoising)
-        2. Euclidean distance matrix (unthresholded)
-        3. Color mapping to 0-1 range
-        4. Resize to 224x224
-        5. Compute and subtract training set pixel means
-        
-        This is distinct from the existing multi-scale UTRP generation.
-        """
-        global TAU_SINGLE, M_SINGLE, SUBBAND_TAU, SUBBAND_M
-        
+    def _save_hdf5(self, samples: List[Dict], path: Path) -> None:
+        if not samples:
+            print(f"  ✗ No samples to save!")
+            return
+            
+        N = len(samples)
+        print(f"  Saving {N} samples → {path}")
+
+        labels  = np.array([s['label']       for s in samples], dtype=np.int8)
+        rids    = np.array([s['record_id'].encode() for s in samples], dtype='S16')
+        sidxs   = np.array([s['segment_idx'] for s in samples], dtype=np.int16)
+        t2os = np.array([s['time_to_onset_min'] for s in samples], dtype=np.float32)
+
+        with h5py.File(path, 'w') as f:
+            # One dataset per image type
+            for key in self.KEYS:
+                # Filter samples that have this key
+                data = np.stack([s['images'][key] for s in samples])
+                f.create_dataset(key, data=data, dtype=np.float32,
+                                 compression='gzip', compression_opts=4)
+
+            meta = f.create_group('metadata')
+            meta.create_dataset('labels',          data=labels)
+            meta.create_dataset('record_ids',      data=rids)
+            meta.create_dataset('segment_indices', data=sidxs)
+            meta.create_dataset('time_to_onset_min', data=t2os)
+
+            f.attrs.update({
+                'n_samples':       N,
+                'n_preaf':         int((labels == 1).sum()),
+                'n_nsr':           int((labels == 0).sum()),
+                'utrp_size':       UTRP_SIZE,
+                'wavelet':         self.wavelet,
+                'subband_levels':  ','.join(f'D{l}' for l in SUBBAND_LEVELS),
+                'fs_target':       FS_TARGET,
+                'segment_samples': SEGMENT_SAMPLES,
+                'epsilon_frac':    EPSILON_FRAC,
+                'colourmap':       'JET',
+                'single_preprocessing': 'raw_minmax_no_denoise',
+            })
+
+        n_preaf = int((labels == 1).sum())
+        n_nsr   = int((labels == 0).sum())
+        print(f"  Saved — NSR={n_nsr}  Pre-AF={n_preaf}")
+
+    def generate(self, params_file: Path, seed: int = 42) -> None:
+        print('=' * 70)
+        print('GENERATING UTRP DATASET')
+        print(f'  Wavelet:  {self.wavelet}')
+        print(f'  Subbands: D{min(SUBBAND_LEVELS)}–D{max(SUBBAND_LEVELS)}')
+        print(f'  Output:   {self.output_dir}')
+        print('=' * 70)
+
+        # Load tau/m
+        with open(params_file) as f:
+            params = json.load(f)
+        tau_single   = params['tau_single']
+        m_single     = params['m_single']
+        subband_tau  = params['subband_tau']
+        subband_m    = params['subband_m']
+        print(f"\nEmbedding params: τ_single={tau_single}  m_single={m_single}")
+
+        # Build records lists
         nsr_records   = ([f'n{i:02d}'  for i in range(1, 51)] +
                          [f'n{i:02d}c' for i in range(1, 51)])
         preaf_records = [f'p{i:02d}' for i in range(1, 51)]
-        
-        all_records = ([(r, 0) for r in nsr_records] +
-                      [(r, 1) for r in preaf_records])
-        
-        print(f"Paper Pipeline UTRP Generation")
-        print(f"Records: {len(all_records)} (NSR={len(nsr_records)}, Pre-AF={len(preaf_records)})")
-        
-        # Load or estimate tau/m parameters
-        params_file = output_path.parent / 'tau_m_params.json'
-        params = load_tau_m_params(params_file)
-        
-        if params is None:
-            print("\nNo tau/m params found, estimating from data...")
-            params = estimate_global_tau_m(nsr_records, preaf_records, seed=seed)
-            save_tau_m_params(params, params_file)
-        
-        TAU_SINGLE = params['tau_single']
-        M_SINGLE = params['m_single']
-        SUBBAND_TAU = params['subband_tau']
-        SUBBAND_M = params['subband_m']
-        
-        print(f"\nUsing parameters:")
-        print(f"  Single-scale: τ={TAU_SINGLE}, m={M_SINGLE}")
-        
-        # Build split
-        subjects = build_subject_groups(preaf_records, nsr_records)
-        split = split_subjects_721(subjects, seed=seed)
-        
-        nsr_set = set(nsr_records)
-        preaf_set = set(preaf_records)
+        nsr_set       = set(nsr_records)
+
+        # Patient-level split (pairs grouped)
+        subjects = build_subject_groups(nsr_records, preaf_records)
+        split    = split_subjects_721(subjects, seed=seed)
+
+        print('\nSplit summary:')
         for name in ('train', 'val', 'test'):
-            recs = split[name]
+            recs  = split[name]
             n_nsr = sum(1 for r in recs if r in nsr_set)
-            n_preaf = sum(1 for r in recs if r in preaf_set)
-            print(f"  {name:5s}: {len(recs)} records (NSR={n_nsr} Pre-AF={n_preaf}) → ~{len(recs)*N_SEGMENTS} segments")
-        
-        # Process all samples (no normalization before UTRP generation)
-        tasks = [
-            (rec_id, label, seg_idx, TAU_SINGLE, M_SINGLE)
-            for rec_id, label in all_records
-            for seg_idx in range(N_SEGMENTS)
-        ]
-        print(f"Total tasks: {len(tasks)}")
-        
-        # Process segments using multiprocessing
-        n_workers = min(multiprocessing.cpu_count(), 8)
-        samples_raw = []
-        sample_info = []  # (record_id, label, segment_idx)
-        
-        with ProcessPoolExecutor(max_workers=n_workers) as ex:
-            futures = {ex.submit(process_segment_paper, t): t for t in tasks}
-            for fut in tqdm(as_completed(futures), total=len(tasks), desc='Generating paper-style UTRPs'):
-                result = fut.result()
-                args = futures[fut]
-                record_id, label, segment_idx, _, _ = args
-                if result is not None:
-                    samples_raw.append(result)
-                    sample_info.append((record_id, label, segment_idx))
-        
-        print(f"Processed {len(samples_raw)}/{len(tasks)} segments")
-        
-        # Compute pixel means from training set only
-        train_recs = set(split['train'])
-        train_indices = [i for i, (rid, _, _) in enumerate(sample_info) if rid in train_recs]
-        
-        if train_indices:
-            train_images = np.stack([samples_raw[i] for i in train_indices], axis=0)  # (N, 3, 224, 224)
-            pixel_means = train_images.mean(axis=0)  # (3, 224, 224)
-            print(f"Computed pixel means from {len(train_indices)} training samples")
-        else:
-            pixel_means = np.zeros((3, 224, 224), dtype=np.float32)
-            print("Warning: No training samples found; using zero means")
-        
-        # Subtract means from all samples
-        samples_centered = np.stack(samples_raw, axis=0)  # (N, 3, 224, 224)
-        samples_centered = samples_centered - pixel_means[np.newaxis, ...]
-        
-        # Save to HDF5
-        self._save_hdf5_paper_pipeline(
-            samples_centered, sample_info, split, output_path, pixel_means
-        )
-    
-    def _save_hdf5_paper_pipeline(self, images: np.ndarray, sample_info: list, split: dict, 
-                                  path: Path, pixel_means: np.ndarray) -> None:
-        """Save paper-pipeline UTRPs to HDF5."""
-        print(f"\nSaving paper-pipeline UTRPs → {path}")
-        
-        labels = np.array([label for _, label, _ in sample_info], dtype=np.int8)
-        record_ids = np.array([rid.encode() for rid, _, _ in sample_info], dtype='S16')
-        segment_indices = np.array([sidx for _, _, sidx in sample_info], dtype=np.int16)
-        
-        with h5py.File(path, 'w') as f:
-            # Main UTRP data
-            f.create_dataset('images', data=images, dtype=np.float32, compression='gzip', compression_opts=4)
-            
-            # Metadata
-            meta = f.create_group('metadata')
-            meta.create_dataset('labels', data=labels)
-            meta.create_dataset('record_ids', data=record_ids)
-            meta.create_dataset('segment_indices', data=segment_indices)
-            
-            # Pixel means for reproducibility
-            f.create_dataset('pixel_means', data=pixel_means, dtype=np.float32)
-            
-            # Split information
-            split_info = {
-                'train': split['train'],
-                'val': split['val'],
-                'test': split['test'],
-            }
-            f.attrs['split_info'] = json.dumps(split_info)
-            
-            # Summary attributes
-            f.attrs.update({
-                'n_samples': len(images),
-                'n_preaf': int((labels == 1).sum()),
-                'n_nsr': int((labels == 0).sum()),
-                'image_size': 224,
-                'tau_single': TAU_SINGLE,
-                'm_single': M_SINGLE,
-                'fs_target': FS_TARGET,
-                'segment_samples': SEGMENT_SAMPLES,
-                'n_segments_per_record': N_SEGMENTS,
-                'normalization': 'no_pre_utrp_norm_with_pixel_mean_subtraction',
-                'paper_pipeline': True,
-            })
-        
-        print(f"Saved {len(images)} samples — Pre-AF={int((labels==1).sum())} NSR={int((labels==0).sum())}")
-        print(f"Images shape: {images.shape}, Pixel means shape: {pixel_means.shape}")
+            n_paf = sum(1 for r in recs if r not in nsr_set)
+            print(f'  {name:5s}: {len(recs):3d} records '
+                  f'(NSR={n_nsr:2d} PreAF={n_paf:2d}) '
+                  f'→ ~{len(recs)*N_SEGMENTS} segments')
+
+        # Save split JSON
+        split_out = {**split, 'seed': seed, 'wavelet': self.wavelet}
+        split_path = self.output_dir / 'split.json'
+        with open(split_path, 'w') as f:
+            json.dump(split_out, f, indent=2)
+        print(f'\nSplit saved → {split_path}')
+
+        # Process and save each split
+        for split_name in ('train', 'val', 'test'):
+            print(f'\n── {split_name.upper()} ──')
+            samples = []
+            for record_id in split[split_name]:
+                label = 0 if record_id in nsr_set else 1
+                samples.extend(self._process_record(
+                    record_id, label,
+                    tau_single, m_single,
+                    subband_tau, subband_m
+                ))
+            self._save_hdf5(samples, self.output_dir / f'{split_name}.h5')
+
+        print(f'\n✓ Done → {self.output_dir}')
 
 
 if __name__ == '__main__':
-    OUTPUT_PATH = Path(
-        '/data/data_new/attention/utrp_256_level_8.h5'
-    )
-    gen = ZhuDatasetGenerator()
-    gen.generate(output_path=OUTPUT_PATH, seed=42)
-    # gen.generate_utrp_paper_pipeline(output_path=OUTPUT_PATH, seed=42)
+    mode = 'generate'
+    params_file = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/attention/tau_m_params.json')
+    output_dir = OUTPUT_DIR
+    seed = 42
+    
+    split = 'train'
+    n_samples = 6
+    
+    if mode == 'generate':
+        gen = DatasetGenerator(output_dir=output_dir, wavelet=WAVELET)
+        gen.generate(params_file=params_file, seed=seed)
 
-
-
+    else:  # visualise
+        vis = UTRPVisualiser(dataset_dir=output_dir)
+        vis.class_distribution()
+        vis.show_grid(
+            split=split,
+            n_samples=n_samples,
+            seed=seed,
+            save_path=output_dir / f'sample_grid_{split}.png',
+        )

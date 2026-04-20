@@ -138,7 +138,7 @@ class UTRPVisualizer:
                                     pad = keep_samples - len(arr)
                                     subbands[k] = np.pad(arr, (pad // 2, pad - pad // 2), mode='reflect')
 
-                    ss_utrp, ss_dist = create_utrp(seg_den, TAU_SINGLE, M_SINGLE, 256)
+                    ss_utrp, ss_dist = create_utrp(seg, TAU_SINGLE, M_SINGLE, 256)
                     reconstructed = True
                     subband_signals = subbands
             except Exception as e:

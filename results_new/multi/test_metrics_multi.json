@@ -1,0 +1,29 @@
+{
+  "model_arch": "multi",
+  "metrics": {
+    "accuracy": 0.9238095238095239,
+    "balanced_accuracy": 0.9366666666666666,
+    "precision": 0.8055555555555556,
+    "recall": 0.9666666666666667,
+    "f1": 0.8787878787878788,
+    "sensitivity": 0.9666666666666667,
+    "specificity": 0.9066666666666666,
+    "true_positive_rate": 0.9666666666666667,
+    "true_negative_rate": 0.9066666666666666,
+    "false_positive_rate": 0.09333333333333334,
+    "false_negative_rate": 0.03333333333333333,
+    "positive_predictive_value": 0.8055555555555556,
+    "negative_predictive_value": 0.9855072463768116,
+    "auc_roc": 0.9843333333333333,
+    "auprc": 0.9672948560967586,
+    "mcc": 0.8311807948260117,
+    "youden_index": 0.8733333333333333,
+    "tp": 58,
+    "tn": 136,
+    "fp": 14,
+    "fn": 2,
+    "n_samples": 210,
+    "n_positive": 60,
+    "n_negative": 150
+  }
+}
