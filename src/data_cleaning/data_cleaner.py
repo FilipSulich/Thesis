@@ -27,10 +27,9 @@ class DataCleaner:
         return filtfilt(b, a, signal)
 
     def normalize(self, signal):
-        std = np.std(signal)
-        if std == 0:
-            return signal
-        return (signal - np.mean(signal)) / std
+        min = float(np.min(signal))
+        max = float(np.max(signal))
+        return (signal - min) / (max - min + 1e-8)
 
     def clip_subband_outliers(self, signal, n_std=3):
         mu = np.mean(signal)

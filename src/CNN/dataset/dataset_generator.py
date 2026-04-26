@@ -13,7 +13,7 @@ from scipy import signal as sp_signal
 import os
 import sys
 
-from src.CNN.dataset.visualizer import UTRPVisualiser
+from src.CNN.visualizers.visualizer import UTRPVisualiser
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,8 +21,8 @@ from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerat
 
 warnings.filterwarnings('ignore')
 
-DATA_DIR        = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/paf')
-OUTPUT_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_final/utrp_dataset_db8_no_denoise')
+DATA_DIR        = Path('/data_old/paf')
+OUTPUT_DIR      = Path('/data/data_final/utrp_dataset_db8_no_denoise_d2_d8')
 
 FS_ORIG         = 128
 FS_TARGET       = 500
@@ -208,6 +208,26 @@ def split_subjects_721(subjects: List[Tuple],
         'test':  _extract(pa_te + ns_te),
     }
 
+def reconstruct_bandpass(signal_padded: np.ndarray, wavelet) -> np.ndarray:
+    """
+    Reconstruct signal keeping only D2-D8.
+    Zeroes D1 (HF noise >125Hz) and D9/D10 (baseline wander <1Hz).
+    No thresholding — purely structural bandpass via wavelet zeroing.
+    """
+    coeffs = pywt.swt(signal_padded, wavelet, level=N_LEVELS_SWT)
+    n_lvls = len(coeffs)
+    keep = set(SUBBAND_LEVELS)  # {2,3,4,5,6,7,8}
+
+    filtered = []
+    for j, (cA, cD) in enumerate(coeffs):
+        actual_level = n_lvls - j  # SWT returns finest first
+        if actual_level in keep:
+            filtered.append((np.zeros_like(cA), cD))
+        else:
+            filtered.append((np.zeros_like(cA), np.zeros_like(cD)))
+
+    reconstructed = pywt.iswt(filtered, wavelet)[:SEGMENT_SAMPLES]
+    return _minmax(reconstructed.astype(np.float32))
 class DatasetGenerator:
     KEYS = ['single'] + [f'D{l}' for l in SUBBAND_LEVELS]
 
@@ -216,6 +236,7 @@ class DatasetGenerator:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.wavelet    = wavelet
+
 
     def _load_signal(self, record_id: str) -> Optional[np.ndarray]:
         try:
@@ -252,7 +273,7 @@ class DatasetGenerator:
         num = int(match.group(1))
 
         if num % 2 == 0:
-            return 45
+            return -2
 
         # p-odd: 30-min pre-AF recording ending at onset
         max_start = FS_TARGET * 30 * 60 - SEGMENT_SAMPLES
@@ -274,28 +295,19 @@ class DatasetGenerator:
         for seg_idx, seg in enumerate(segments):
             seg_pad = _pad(seg)
 
-            # Multi-scale: extract subbands WITHOUT denoising
             subbands_multi = extract_subbands_no_denoise(
                 seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
             )
-            
-            # Single-scale: denoise and get full reconstruction
-            # seg_den, _ = denoise_and_extract_subbands(
-            #     seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
-            # )
 
             images: Dict[str, np.ndarray] = {}
-            min_max_seg = _minmax(seg)
 
-            # Single-scale UTRP from denoised signal
-            # single_utrp = compute_utrp(seg_den, tau_single, m_single)
-            single_utrp = compute_utrp(min_max_seg, tau_single, m_single)
+            seg_bandpass = reconstruct_bandpass(seg_pad, WAVELET)
+            single_utrp = compute_utrp(seg_bandpass, tau_single, m_single)
 
             if single_utrp is None:
                 continue  # Skip this segment if UTRP computation failed
             images['single'] = single_utrp
 
-            # Multi-scale UTRPs (D2-D8) from undenoised subbands
             skip_segment = False
             for level in SUBBAND_LEVELS:
                 name = f'D{level}'
@@ -314,7 +326,7 @@ class DatasetGenerator:
                 'record_id':   record_id,
                 'segment_idx': seg_idx,
                 'label':       label,
-                'time_to_onset_min': self._get_time_to_onset(record_id, seg_idx),
+                'time_to_onset_sec': self._get_time_to_onset(record_id, seg_idx),
                 'images':      images,
             })
 
@@ -332,7 +344,7 @@ class DatasetGenerator:
         labels  = np.array([s['label']       for s in samples], dtype=np.int8)
         rids    = np.array([s['record_id'].encode() for s in samples], dtype='S16')
         sidxs   = np.array([s['segment_idx'] for s in samples], dtype=np.int16)
-        t2os = np.array([s['time_to_onset_min'] for s in samples], dtype=np.float32)
+        t2os = np.array([s['time_to_onset_sec'] for s in samples], dtype=np.float32)
 
         with h5py.File(path, 'w') as f:
             # One dataset per image type
@@ -346,7 +358,7 @@ class DatasetGenerator:
             meta.create_dataset('labels',          data=labels)
             meta.create_dataset('record_ids',      data=rids)
             meta.create_dataset('segment_indices', data=sidxs)
-            meta.create_dataset('time_to_onset_min', data=t2os)
+            meta.create_dataset('time_to_onset_sec', data=t2os)
 
             f.attrs.update({
                 'n_samples':       N,
@@ -426,8 +438,8 @@ class DatasetGenerator:
 
 
 if __name__ == '__main__':
-    mode = 'generate'
-    params_file = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_new/attention/tau_m_params.json')
+    mode = 'visualize'
+    params_file = Path('/data_old/data_new/attention/tau_m_params.json')
     output_dir = OUTPUT_DIR
     seed = 42
     

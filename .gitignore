@@ -1,11 +1,12 @@
+/data/data_old
 /data
 .DS_STORE
 __pycache__
 .idea
-/data/outputs
-/data/data_new
+/data/data_old/outputs
+/data/data_old/data_new
 *.h5
-/results
+/data/results
 /multi_resnet
-/data_final
-/outputs
+/data/data_final
+/data/outputs
