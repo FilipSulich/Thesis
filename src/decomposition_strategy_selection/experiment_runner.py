@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import ttest_ind, mannwhitneyu
 
-from src.experiment1.subband_calculator import SubbandCalculator
-from src.experiment1.subband_plotter import SubbandPlotter
+from src.decomposition_strategy_selection.subband_calculator import SubbandCalculator
+from src.decomposition_strategy_selection.subband_plotter import SubbandPlotter
 
 
 class ExperimentRunner:

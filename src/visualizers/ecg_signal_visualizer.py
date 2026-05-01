@@ -224,6 +224,7 @@ class ECGSignalVisualizer:
 
 if __name__ == '__main__':
     # Usage preserved for n31 and p01
-    vis = ECGSignalVisualizer()
-    for rid in ['n31', 'p34']:
-        vis.visualize_complete(record_id=rid, save_dir='./results')
+    data=Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf")
+    vis = ECGSignalVisualizer(data_dir=data)
+    for rid in ['n47', 'p25']:
+        vis.visualize_complete(record_id=rid, save_dir='/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new')

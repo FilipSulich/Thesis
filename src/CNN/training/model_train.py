@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from src.CNN.dataset.dataset import UTRPDataset
-from src.CNN.models.models import LateFusionWithAttention, HybridFusionWithAttention, SingleScaleCNN
+from src.CNN.models.models import MultiScaleCNN, HybridCNN, SingleScaleCNN
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -199,9 +199,9 @@ def train_model(
     if model_arch == 'single':
         model = SingleScaleCNN(dropout=dropout).to(device)
     elif model_arch == 'multi':
-        model = LateFusionWithAttention(n_subbands=7, dropout=dropout).to(device)
+        model = MultiScaleCNN(n_subbands=7, dropout=dropout).to(device)
     else:
-        model = HybridFusionWithAttention(n_subbands=7, dropout=dropout).to(device)
+        model = HybridCNN(n_subbands=7, dropout=dropout).to(device)
     print(f"Parameters: {model.count_params():,}")
 
     # Class-weighted loss
@@ -427,9 +427,9 @@ def train_model_cv(
         if model_arch == 'single':
             model = SingleScaleCNN(dropout=dropout).to(device)
         elif model_arch == 'multi':
-            model = LateFusionWithAttention(n_subbands=7, dropout=dropout).to(device)
+            model = MultiScaleCNN(n_subbands=7, dropout=dropout).to(device)
         else:
-            model = HybridFusionWithAttention(n_subbands=7, dropout=dropout).to(device)
+            model = HybridCNN(n_subbands=7, dropout=dropout).to(device)
 
         if fold_idx == 0:
             print(f"Parameters: {model.count_params():,}")
@@ -562,17 +562,17 @@ def train_model_cv(
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    DATA_DIR    = Path('/data/data_final/utrp_dataset_db8')
-    RESULTS_ROOT = Path('/data/results_final')
+    DATA_DIR    = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8')
+    RESULTS_ROOT = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_final_cv')
 
     # ── Configuration ──────────────────────────────────────────────────────────
-    USE_CROSS_VALIDATION = False  # Set to True for 5-fold CV, False for single train
-    N_FOLDS = 5
+    USE_CROSS_VALIDATION = True  # Set to True for 5-fold CV, False for single train
+    N_FOLDS = 4
 
     CONFIGS = [
         # dict(model_arch='single', lr=1e-4, dropout=0.5, epochs=100, patience=20),
-        # dict(model_arch='multi',  lr=1e-4, dropout=0.5, epochs=100, patience=20),
-        dict(model_arch='hybrid', lr=1e-4, dropout=0.5, epochs=100, patience=20),
+        dict(model_arch='multi',  lr=1e-4, dropout=0.5, epochs=100, patience=20),
+        # dict(model_arch='hybrid', lr=1e-4, dropout=0.5, epochs=100, patience=20),
     ]
 
     all_results = {}

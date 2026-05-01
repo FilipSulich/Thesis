@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 
@@ -57,6 +58,7 @@ class ECGWaveletEvaluator:
         print(f"\n✓ Loading and evaluating from cache: {h5_path}\n")
 
         lr = LogisticRegression(max_iter=1000, C=1.0, solver='lbfgs')
+
         scaler = StandardScaler()
 
         with h5py.File(h5_path, 'r') as f:
@@ -562,9 +564,9 @@ if __name__ == '__main__':
     import wfdb
     from scipy import signal as sp_signal
 
-    DATA_DIR = Path('/data_old/paf')
-    SPLIT_JSON = Path('/data_old/data_new/attention/utrp_new_denoise2.split.json')
-    OUT_DIR = Path('/src/wavelet_selection_tests/wavelet_selection/results')
+    DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf')
+    SPLIT_JSON = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/data_new/attention/utrp_new_denoise2.split.json')
+    OUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/src/wavelet_selection_tests/wavelet_selection/results_knn')
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     FS_ORIG = 128
@@ -646,7 +648,7 @@ if __name__ == '__main__':
 
     # Evaluate
     evaluator = ECGWaveletEvaluator(X_train, y_train, X_test, y_test, sampling_rate=FS_TARGET)
-    h5_path = OUT_DIR / 'data_old.h5'
+    h5_path = OUT_DIR / 'data.h5'
 
     evaluator.evaluate_from_cache(h5_path)
 

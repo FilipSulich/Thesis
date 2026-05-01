@@ -38,13 +38,6 @@ class DataCleaner:
             return signal
         return np.clip(signal, mu - n_std * sigma, mu + n_std * sigma)
 
-    def preprocess_subband(self, subband_signal, clip_std=3, trim_seconds=None):
-        # signal = self.clip_subband_outliers(subband_signal, clip_std)
-        # if np.var(signal) < 1e-4:
-        #     return None
-        signal = self.normalize(subband_signal)
-        return signal
-
     def _pan_tompkins_(self, signal):
         r_peaks = self.detectors.pan_tompkins_detector(signal)
         return r_peaks

@@ -24,11 +24,11 @@ class SubbandCalculator:
         self.is_sine = is_sine
 
         # self.SUBBAND_FREQS = {
-        #     'A4': 1,
-        #     'D4': 5,   # 4-8 Hz
-        #     'D3': 13,  # 8-16 Hz
-        #     'D2': 23,  # 16-32 Hz
-        #     'D1': 47   # 32-64 Hz
+        #     'A4': 3,
+        #     'D4': 7,   # 4-8 Hz
+        #     'D3': 17,  # 8-16 Hz
+        #     'D2': 31,  # 16-32 Hz
+        #     'D1': 61   # 32-64 Hz
         # }
         #
         self.SUBBAND_FREQS = {
@@ -38,7 +38,7 @@ class SubbandCalculator:
         self.BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
         self.PIPELINES = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
 
-        self.OUTPUT_DIR = '/data_old/outputs/experiment1_sine_new'
+        self.OUTPUT_DIR = '/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/outputs/experiment1_sine_non_harm'
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
@@ -761,14 +761,5 @@ class SubbandCalculator:
         noise_results = {}
 
         leakage = self.run_leakage_analysis(100)
-
-        for snr_db in [20, 10, 5, 1]:
-            for pipeline in self.PIPELINES:
-                mean_df, std_df = self.validate_with_noise(
-                    signal, pipeline, reference_epsilons, snr_db, n_realizations=50, reference_rqa=reference_rqa, reference_data=reference_data
-                )
-
-                noise_results[f"{pipeline}_snr{snr_db}_mean"] = mean_df
-                noise_results[f"{pipeline}_snr{snr_db}_std"] = std_df
 
         return clean_results, noise_results, reference_epsilons, leakage

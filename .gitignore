@@ -10,3 +10,6 @@ __pycache__
 /multi_resnet
 /data/data_final
 /data/outputs
+/data_new_new
+/results_kfold
+/results_kfold2

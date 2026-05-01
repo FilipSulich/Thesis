@@ -1,7 +1,3 @@
-"""
-Model Evaluator - Load trained model and compute test metrics
-"""
-
 import json
 import os
 import random
@@ -21,17 +17,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.CNN.dataset.dataset import UTRPDataset
-from src.CNN.models.models import LateFusionWithAttention, HybridFusionWithAttention, SingleScaleCNN
+from src.CNN.models.models import MultiScaleCNN, HybridCNN, SingleScaleCNN
 
 
 class ModelEvaluator:
-    """
-    Evaluator for trained UTRP classification models.
-    
-    Loads a trained model checkpoint and evaluates it on test data_old
-    with comprehensive metrics including AUPRC.
-    """
-    
+
     def __init__(self, model_path: Path, data_dir: Path, model_arch: str = 'single'):
         """
         Initialize evaluator.
@@ -137,10 +127,10 @@ class ModelEvaluator:
             # self.model = SingleScalePaperCNN(dropout=dropout).to(self.device)
             self.model = SingleScaleCNN(dropout=dropout).to(self.device)
         elif self.model_arch == 'multi':
-            self.model = LateFusionWithAttention(
+            self.model = MultiScaleCNN(
                 n_subbands=n_subbands, dropout=dropout).to(self.device)
         else:
-            self.model = HybridFusionWithAttention(
+            self.model = HybridCNN(
                 n_subbands=n_subbands, dropout=dropout).to(self.device)
 
         try:
@@ -248,6 +238,8 @@ class ModelEvaluator:
         all_probs = np.array(all_probs)
         all_labels = np.array(all_labels)
 
+        # self.model.get_attention_weights(all_preds)
+
         self.predictions = {'preds': all_preds, 'probs': all_probs, 'labels': all_labels}
         return self._compute_metrics(all_preds, all_probs, all_labels)
     
@@ -290,14 +282,7 @@ class ModelEvaluator:
         # Balanced Accuracy
         balanced_accuracy = (sensitivity + specificity) / 2
         
-        # Matthews Correlation Coefficient
-        mcc_numerator = (tp * tn) - (fp * fn)
-        mcc_denominator = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-        mcc = mcc_numerator / mcc_denominator if mcc_denominator > 0 else 0
-        
-        # Youden's Index
-        youden = sensitivity + specificity - 1
-        
+
         # Compile comprehensive metrics
         metrics = {
             # Basic Classification
@@ -322,10 +307,6 @@ class ModelEvaluator:
             # Discrimination Metrics
             'auc_roc': float(roc_auc),
             'auprc': float(auprc),
-            
-            # Additional Metrics
-            'mcc': float(mcc),  # Matthews Correlation Coefficient
-            'youden_index': float(youden),
             
             # Confusion Matrix
             'tp': int(tp),
@@ -367,11 +348,7 @@ class ModelEvaluator:
         print("\nDiscrimination Metrics:")
         print(f"  AUC-ROC:                {metrics['auc_roc']:.4f}")
         print(f"  AUPRC:                  {metrics['auprc']:.4f}")
-        
-        print("\nAdditional Metrics:")
-        print(f"  Matthews Corr Coeff:    {metrics['mcc']:.4f}")
-        print(f"  Youden's Index:         {metrics['youden_index']:.4f}")
-        
+
         print("\nConfusion Matrix:")
         print(f"  True Negatives (TN):    {metrics['tn']}")
         print(f"  False Positives (FP):   {metrics['fp']}")
@@ -435,18 +412,203 @@ class ModelEvaluator:
     def get_pr_curve(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Get Precision-Recall curve points.
-        
+
         Returns:
             (precision, recall, thresholds)
         """
         if not self.predictions:
             raise RuntimeError("No predictions available. Call evaluate() first.")
-        
+
         precision, recall, thresholds = precision_recall_curve(
             self.predictions['labels'],
             self.predictions['probs']
         )
         return precision, recall, thresholds
+
+    def evaluate_patient_level(self) -> Dict[str, any]:
+        """
+        Evaluate patient-level performance by aggregating segment predictions.
+
+        Groups predictions by patient and aggregates using:
+        - Majority vote: most common prediction across segments
+        - Mean probability: average probability across segments
+
+        Returns:
+            Dictionary with patient-level metrics and detailed analysis
+        """
+        if not self.predictions:
+            raise RuntimeError("No predictions available. Call evaluate() first.")
+        if self.test_dataset is None:
+            raise RuntimeError("Test dataset not loaded.")
+
+        print(f"\n{'='*70}")
+        print("PATIENT-LEVEL PERFORMANCE ANALYSIS")
+        print(f"{'='*70}\n")
+
+        # Collect predictions with metadata
+        patient_data = {}  # {patient_id: {'segments': [], 'probs': [], 'preds': [], 'label': int}}
+
+        for idx in range(len(self.test_dataset)):
+            metadata = self.test_dataset.get_metadata(idx)
+            patient_id = metadata['record_id']
+            segment_idx = metadata['segment_index']
+            true_label = metadata['label']
+
+            pred = self.predictions['preds'][idx]
+            prob = self.predictions['probs'][idx]
+
+            if patient_id not in patient_data:
+                patient_data[patient_id] = {
+                    'segments': [],
+                    'probs': [],
+                    'preds': [],
+                    'label': true_label
+                }
+
+            patient_data[patient_id]['segments'].append(segment_idx)
+            patient_data[patient_id]['probs'].append(prob)
+            patient_data[patient_id]['preds'].append(pred)
+
+        # Aggregate predictions per patient
+        patient_results = {}
+        for patient_id, data in patient_data.items():
+            # Majority vote
+            pred_counts = np.bincount(data['preds'])
+            majority_pred = np.argmax(pred_counts)
+
+            # Mean probability
+            mean_prob = np.mean(data['probs'])
+            mean_prob_pred = 1 if mean_prob >= 0.5 else 0
+
+            # Count misclassified segments
+            segment_errors = [i for i, (seg_idx, pred) in enumerate(zip(data['segments'], data['preds']))
+                            if pred != data['label']]
+
+            patient_results[patient_id] = {
+                'true_label': data['label'],
+                'n_segments': len(data['segments']),
+                'segment_indices': data['segments'],
+                'segment_probs': data['probs'],
+                'segment_preds': data['preds'],
+                'majority_vote_pred': majority_pred,
+                'mean_prob': mean_prob,
+                'mean_prob_pred': mean_prob_pred,
+                'n_errors': len(segment_errors),
+                'error_segments': [data['segments'][i] for i in segment_errors],
+            }
+
+        # Calculate patient-level metrics
+        true_labels_majority = []
+        pred_labels_majority = []
+        true_labels_mean = []
+        pred_labels_mean = []
+        mean_probs = []
+
+        for patient_id, result in patient_results.items():
+            true_labels_majority.append(result['true_label'])
+            pred_labels_majority.append(result['majority_vote_pred'])
+            true_labels_mean.append(result['true_label'])
+            pred_labels_mean.append(result['mean_prob_pred'])
+            mean_probs.append(result['mean_prob'])
+
+        true_labels_majority = np.array(true_labels_majority)
+        pred_labels_majority = np.array(pred_labels_majority)
+        true_labels_mean = np.array(true_labels_mean)
+        pred_labels_mean = np.array(pred_labels_mean)
+        mean_probs = np.array(mean_probs)
+        mean_probs_mean = np.mean(mean_probs)
+
+        # Compute metrics for both aggregation methods
+        metrics_majority = self._compute_metrics(pred_labels_majority, mean_probs, true_labels_majority)
+        metrics_mean = self._compute_metrics(pred_labels_mean, mean_probs, true_labels_mean)
+
+        # Print summary
+        print("Aggregation Method: MAJORITY VOTE")
+        print(f"  Patient-level Accuracy:  {metrics_majority['accuracy']:.4f}")
+        print(f"  Patients classified:     {len(patient_results)}")
+        print(f"  Correct:                 {metrics_majority['tp'] + metrics_majority['tn']}")
+        print(f"  Incorrect:               {metrics_majority['fp'] + metrics_majority['fn']}")
+        print(f"  Sensitivity:             {metrics_majority['sensitivity']:.4f}")
+        print(f"  Specificity:             {metrics_majority['specificity']:.4f}")
+        print(f"  AUC-ROC:                 {metrics_majority['auc_roc']:.4f}")
+        print(f"Mean pred. probability:   {mean_probs_mean:.2f}")
+
+        print("\nAggregation Method: MEAN PROBABILITY")
+        print(f"  Patient-level Accuracy:  {metrics_mean['accuracy']:.4f}")
+        print(f"  Correct:                 {metrics_mean['tp'] + metrics_mean['tn']}")
+        print(f"  Incorrect:               {metrics_mean['fp'] + metrics_mean['fn']}")
+        print(f"  Sensitivity:             {metrics_mean['sensitivity']:.4f}")
+        print(f"  Specificity:             {metrics_mean['specificity']:.4f}")
+        print(f"  AUC-ROC:                 {metrics_mean['auc_roc']:.4f}")
+
+        # Analyze misclassified patients
+        print(f"\n{'─'*70}")
+        print("MISCLASSIFIED PATIENTS (Majority Vote):")
+        print(f"{'─'*70}")
+
+        misclassified_patients = [
+            (pid, result) for pid, result in patient_results.items()
+            if result['majority_vote_pred'] != result['true_label']
+        ]
+
+        if misclassified_patients:
+            for patient_id, result in sorted(misclassified_patients):
+                true_class = "Pre-AF" if result['true_label'] == 1 else "NSR"
+                pred_class = "Pre-AF" if result['majority_vote_pred'] == 1 else "NSR"
+                print(f"\nPatient: {patient_id}")
+                print(f"  True: {true_class}, Predicted: {pred_class}")
+                print(f"  Segments with errors: {result['n_errors']}/{result['n_segments']}")
+                print(f"  Error segment indices: {result['error_segments']}")
+                print(f"  Mean probability: {result['mean_prob']:.4f}")
+        else:
+            print("  None - all patients correctly classified!")
+
+        # Find patients with most segment errors
+        print(f"\n{'─'*70}")
+        print("PATIENTS WITH MOST SEGMENT ERRORS:")
+        print(f"{'─'*70}")
+
+        sorted_by_errors = sorted(patient_results.items(),
+                                 key=lambda x: x[1]['n_errors'],
+                                 reverse=True)
+
+        print("\nTop 10 patients with most misclassified segments:")
+        for i, (patient_id, result) in enumerate(sorted_by_errors[:10], 1):
+            if result['n_errors'] == 0:
+                break
+            true_class = "Pre-AF" if result['true_label'] == 1 else "NSR"
+            print(f"{i:2d}. {patient_id}: {result['n_errors']}/{result['n_segments']} errors "
+                  f"(True: {true_class})")
+
+        # Segment-level error distribution
+        print(f"\n{'─'*70}")
+        print("SEGMENT ERROR DISTRIBUTION:")
+        print(f"{'─'*70}")
+
+        segment_error_counter = {}
+        for patient_id, result in patient_results.items():
+            for seg_idx in result['error_segments']:
+                segment_error_counter[seg_idx] = segment_error_counter.get(seg_idx, 0) + 1
+
+        if segment_error_counter:
+            print("\nSegment indices with most errors across all patients:")
+            sorted_segments = sorted(segment_error_counter.items(),
+                                    key=lambda x: x[1],
+                                    reverse=True)
+            for seg_idx, count in sorted_segments[:5]:
+                print(f"  Segment {seg_idx}: {count} patients had errors")
+        else:
+            print("  No segment errors detected!")
+
+        print(f"\n{'='*70}\n")
+
+        return {
+            'patient_results': patient_results,
+            'metrics_majority': metrics_majority,
+            'metrics_mean': metrics_mean,
+            'n_patients': len(patient_results),
+            'misclassified_patients': misclassified_patients,
+        }
 
     def plot_confusion_matrix(
         self,
@@ -708,6 +870,7 @@ def evaluate_model(
     evaluator.load_test_data(batch_size=batch_size)
     metrics = evaluator.evaluate()
     evaluator.print_metrics(metrics)
+    evaluator.evaluate_patient_level()
 
     if save_metrics_path:
         evaluator.save_metrics_json(metrics, save_metrics_path)
@@ -717,87 +880,42 @@ def evaluate_model(
 
 if __name__ == '__main__':
 
-    model = 'hybrid'
-    attention_mode = 'uniform'
-    # model = 'hybrid'
-    # model = 'single'
+    model = 'multi'
+    attention_mode = 'trained'
 
-    # Set paths
     if model == 'multi':
-        model_path = Path('/data/results_new/multi/final_checkpoint.pt')
+        model_path = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_new/multi/final_checkpoint.pt')
     elif model == 'single':
-        model_path = Path('/data/results_final/single/final_checkpoint.pt')
-        # model_path = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/results_new_d2_d8_2/single/best_checkpoint.pt')
+        model_path = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_new2/single/final_checkpoint.pt')
     else:
         model_path = Path('/data/results_final/hybrid/best_checkpoint.pt')
 
-    data_dir = Path('/data/data_final/utrp_dataset_db8')
-    results_dir = Path('/data/results_new')
+    data_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8')
+    results_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new/results')
 
-    # Evaluate single model
     metrics = evaluate_model(
         model_path,
         data_dir,
         batch_size=32,
-        save_metrics_path=results_dir / f'metrics/test_metrics_{model}_new_{attention_mode}.json',
+        save_metrics_path=results_dir / f'test_metrics_{model}_new_{attention_mode}.json',
         attention_mode=attention_mode
     )
 
-    # Plot confusion matrix for single model
-    ModelEvaluator.set_seed(42)
-    evaluator = ModelEvaluator(model_path, data_dir, model_arch=model)
-    evaluator.load_model(attention_mode=attention_mode)
-    evaluator.load_test_data(batch_size=32)
-    evaluator.evaluate()
+    # ModelEvaluator.set_seed(42)
+    # evaluator = ModelEvaluator(model_path, data_dir, model_arch=model)
+    # evaluator.load_model(attention_mode=attention_mode)
+    # evaluator.load_test_data(batch_size=32)
+    # evaluator.evaluate()
 
-    # Plot normalized confusion matrix
-    evaluator.plot_confusion_matrix(
-        normalize=True,
-        save_path=results_dir / f'confusion_matrix_{model}_{attention_mode}_normalized.png',
-        show=False
-    )
 
-    # Plot raw counts confusion matrix
-    evaluator.plot_confusion_matrix(
-        normalize=False,
-        save_path=results_dir / f'confusion_matrix_{model}_{attention_mode}.png',
-        show=False
-    )
-
-    # Example: Compare multiple models
-    # Uncomment to compare models side by side
-    """
-    evaluators = {}
-
-    # Load single-scale model
-    single_path = Path('.../results_final/single/best_checkpoint.pt')
-    eval_single = ModelEvaluator(single_path, data_dir, 'single')
-    eval_single.load_model()
-    eval_single.load_test_data()
-    eval_single.evaluate()
-    evaluators['Single-scale'] = eval_single
-
-    # Load multi-scale model
-    multi_path = Path('.../results_final/multi/best_checkpoint.pt')
-    eval_multi = ModelEvaluator(multi_path, data_dir, 'multi')
-    eval_multi.load_model()
-    eval_multi.load_test_data()
-    eval_multi.evaluate()
-    evaluators['Multi-scale'] = eval_multi
-
-    # Load hybrid model
-    hybrid_path = Path('.../results_final/hybrid/best_checkpoint.pt')
-    eval_hybrid = ModelEvaluator(hybrid_path, data_dir, 'hybrid')
-    eval_hybrid.load_model()
-    eval_hybrid.load_test_data()
-    eval_hybrid.evaluate()
-    evaluators['Hybrid'] = eval_hybrid
-
-    # Plot confusion matrices comparison
-    ModelEvaluator.plot_confusion_matrices_comparison(
-        evaluators,
-        normalize=True,
-        save_path=results_dir / 'confusion_matrices_comparison.png',
-        title='Confusion Matrices - All Models'
-    )
-    """
+    # evaluator.plot_confusion_matrix(
+    #     normalize=True,
+    #     save_path=results_dir / f'confusion_matrix_{model}_{attention_mode}_normalized.png',
+    #     show=False
+    # )
+    #
+    # evaluator.plot_confusion_matrix(
+    #     normalize=False,
+    #     save_path=results_dir / f'confusion_matrix_{model}_{attention_mode}.png',
+    #     show=False
+    # )

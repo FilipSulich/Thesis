@@ -13,7 +13,6 @@ from scipy import signal as sp_signal
 import os
 import sys
 
-from src.CNN.visualizers.visualizer import UTRPVisualiser
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,8 +20,8 @@ from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerat
 
 warnings.filterwarnings('ignore')
 
-DATA_DIR        = Path('/data_old/paf')
-OUTPUT_DIR      = Path('/data/data_final/utrp_dataset_db8_no_denoise_d2_d8')
+DATA_DIR        = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf')
+OUTPUT_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_denoise')
 
 FS_ORIG         = 128
 FS_TARGET       = 500
@@ -71,6 +70,25 @@ def extract_subbands_no_denoise(
         subbands[f'D{level}'] = _minmax(sub)
 
     return subbands
+
+def denoise_single_scale(
+        signal_padded: np.ndarray,
+        wavelet: str = WAVELET,
+        n_levels: int = N_LEVELS_SWT,
+):
+    import math
+    coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
+
+    N_log = math.log2(FS_TARGET / 0.5)  # Donoho level count
+    denoised_coeffs = []
+    for cA, cD in coeffs:
+        sigma = np.median(np.abs(cD)) / 0.6745
+        T = sigma * math.sqrt(2.0 * math.log(N_log))
+        cD_d = np.sign(cD) * np.maximum(np.abs(cD) - T, 0.0)
+        denoised_coeffs.append((cA, cD_d))
+
+    denoised = pywt.iswt(denoised_coeffs, wavelet)[:SEGMENT_SAMPLES].astype(np.float32)
+    return _minmax(denoised)
 
 
 def denoise_and_extract_subbands(
@@ -301,8 +319,13 @@ class DatasetGenerator:
 
             images: Dict[str, np.ndarray] = {}
 
-            seg_bandpass = reconstruct_bandpass(seg_pad, WAVELET)
-            single_utrp = compute_utrp(seg_bandpass, tau_single, m_single)
+            # seg_bandpass = reconstruct_bandpass(seg_pad, WAVELET)
+
+            seg_denoised = denoise_single_scale(seg_pad, wavelet=WAVELET, n_levels=N_LEVELS_SWT)
+
+            # single_utrp = compute_utrp(seg_bandpass, tau_single, m_single)
+
+            single_utrp = compute_utrp(seg_denoised, tau_single, m_single)
 
             if single_utrp is None:
                 continue  # Skip this segment if UTRP computation failed
@@ -438,8 +461,8 @@ class DatasetGenerator:
 
 
 if __name__ == '__main__':
-    mode = 'visualize'
-    params_file = Path('/data_old/data_new/attention/tau_m_params.json')
+    mode = 'generate'
+    params_file = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/data_new/tau_m_params.json')
     output_dir = OUTPUT_DIR
     seed = 42
     
@@ -450,12 +473,12 @@ if __name__ == '__main__':
         gen = DatasetGenerator(output_dir=output_dir, wavelet=WAVELET)
         gen.generate(params_file=params_file, seed=seed)
 
-    else:  # visualise
-        vis = UTRPVisualiser(dataset_dir=output_dir)
-        vis.class_distribution()
-        vis.show_grid(
-            split=split,
-            n_samples=n_samples,
-            seed=seed,
-            save_path=output_dir / f'sample_grid_{split}.png',
-        )
+    # else:  # visualise
+    #     vis = UTRPVisualiser(dataset_dir=output_dir)
+    #     vis.class_distribution()
+    #     vis.show_grid(
+    #         split=split,
+    #         n_samples=n_samples,
+    #         seed=seed,
+    #         save_path=output_dir / f'sample_grid_{split}.png',
+    #     )

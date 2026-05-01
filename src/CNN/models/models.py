@@ -26,7 +26,7 @@ def make_backbone(in_ch: int) -> nn.Sequential:
         nn.Flatten(),   # → (B, 64)
     )
 
-class HybridFusionWithAttention(nn.Module):
+class HybridCNN(nn.Module):
     def __init__(self, n_subbands: int = 4, dropout: float = 0.5):
         super().__init__()
         n_branches = 1 + n_subbands   # single-scale + subbands
@@ -96,7 +96,7 @@ class HybridFusionWithAttention(nn.Module):
     def count_params(self):
         return sum(p.numel() for p in self.parameters())
 
-class LateFusionWithAttention(nn.Module):
+class MultiScaleCNN(nn.Module):
     """
     Late fusion with learned branch weights.
     Each subband gets its own backbone, then an attention gate
@@ -127,6 +127,7 @@ class LateFusionWithAttention(nn.Module):
             nn.Sigmoid(),  # weights sum to 1 across subbands
         )
 
+        # Old model with averaging: expects feat_dim (64)
         self.head = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(feat_dim, 64),
@@ -134,6 +135,15 @@ class LateFusionWithAttention(nn.Module):
             nn.Dropout(dropout * 0.5),
             nn.Linear(64, 2),
         )
+
+        # New model with concatenation: expects feat_dim * n_subbands
+        # self.head = nn.Sequential(
+        #     nn.Dropout(dropout),
+        #     nn.Linear(feat_dim * n_subbands, 64),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(dropout * 0.5),
+        #     nn.Linear(64, 2),
+        # )
 
         self._init_weights()
 
@@ -158,6 +168,7 @@ class LateFusionWithAttention(nn.Module):
         # weights: (B, n_subbands, 1), stacked: (B, n_subbands, 64)
         weights = weights.unsqueeze(-1)  # (B, n_subbands, 1)
         fused = (stacked * weights).sum(dim=1)  # (B, 64)
+        # fused = torch.cat(branch_feats, dim=1)
 
         return self.head(fused)
 
