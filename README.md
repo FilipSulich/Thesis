@@ -2,4 +2,4 @@
 ## KEN3500 Bachelor's Thesis 
 ### BSc Data Science and Artificial Intelligence
 ### Maastricht University
-### Author: Filip Sulich, i6361564, 17.06.2026
+### Author: Filip Sulich, i6361564

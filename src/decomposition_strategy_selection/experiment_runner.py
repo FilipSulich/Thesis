@@ -1,260 +1,246 @@
+"""Pipeline comparison experiment runner with statistical analysis."""
+
 import os
 import numpy as np
 import pandas as pd
-from scipy.stats import ttest_ind, mannwhitneyu
+from scipy.stats import kruskal
+from scikit_posthocs import posthoc_dunn
 
-from src.decomposition_strategy_selection.subband_calculator import SubbandCalculator
-from src.decomposition_strategy_selection.subband_plotter import SubbandPlotter
+from src.decomposition_strategy_selection.decomposition_analyzer import DecompositionAnalyzer
+from src.decomposition_strategy_selection.visualization import DecompositionVisualizer
 
 
 class ExperimentRunner:
-    def __init__(self, is_sine=True):
-        self.calculator = SubbandCalculator(is_sine=is_sine)
-        self.plotter = SubbandPlotter(
-            self.calculator.OUTPUT_DIR,
-            self.calculator.BAND_NAMES,
-            self.calculator.SUBBAND_FREQS,
-            self.calculator.FS
+    """
+    Manages pipeline comparison experiments and statistical analysis.
+
+    Runs multiple trials, performs statistical testing, and generates visualizations.
+    """
+
+    METRICS = [
+        'det_deviation',
+        'lam_deviation',
+        'tt_deviation',
+        # 'entr_deviation',
+        'hamming_distance',
+        'rp_pattern_corr'
+    ]
+
+    def __init__(self, subband_freqs, fs=128, n=1024, level=4, wavelet='db4', output_dir=None):
+        """
+        Initialize experiment runner.
+
+        Args:
+            subband_freqs: Dict mapping band names to frequencies (e.g., {'D4': 6, 'D3': 12, ...})
+            fs: Sampling frequency (Hz)
+            n: Signal length (samples)
+            level: Wavelet decomposition level
+            wavelet: Wavelet type (e.g., 'db4')
+            output_dir: Directory for saving results
+        """
+        self.analyzer = DecompositionAnalyzer(
+            subband_freqs=subband_freqs,
+            fs=fs,
+            n=n,
+            level=level,
+            wavelet=wavelet,
+            output_dir=output_dir
         )
+        self.output_dir = self.analyzer.OUTPUT_DIR
+        self.visualizer = DecompositionVisualizer(output_dir=self.output_dir)
 
-    def run_full_experiment(self, n_trials=100, include_leakage=True, include_aliasing=True):
-        ref_path = os.path.join(self.calculator.OUTPUT_DIR, 'reference_rqa_values.json')
-        if not os.path.exists(ref_path):
-            ref_rqa = self.calculator.generate_reference_rqa_values(ref_path)
+    def run_experiment(self, n_trials=100):
+        """
+        Run complete pipeline comparison experiment.
+
+        Args:
+            n_trials: Number of trials with random phases
+
+        Returns:
+            agg_df: Aggregated results DataFrame
+            stats_df: Statistical analysis results
+        """
+        print(f"\n{'='*80}")
+        print(f"RUNNING PIPELINE COMPARISON: {n_trials} TRIALS")
+        print(f"{'='*80}")
+        print(f"Output directory: {self.output_dir}\n")
+
+        # Load or generate ground truth
+        gt_path = os.path.join(self.output_dir, 'ground_truth.json')
+        if os.path.exists(gt_path):
+            print("Loading ground truth...")
+            ground_truth, ground_truth_data = self.analyzer.load_ground_truth(gt_path)
         else:
-            ref_rqa = self.calculator.load_reference_rqa_values(ref_path)
+            print("Generating ground truth...")
+            ground_truth, ground_truth_data = self.analyzer.generate_ground_truth(gt_path)
 
-        ref_data = self.calculator.load_reference_data(ref_path.replace('.json', '_data.npz'))
-        results = {
-            p: {
-                m: [] for m in ['det_deviation', 'lam_deviation', 'tt_deviation',
-                               'hamming_distance', 'ibf', 'rp_pattern_corr', 'frobenius_distance']
-            } for p in self.calculator.PIPELINES
-        }
-        all_trial_data = []
+        # Run trials
+        print(f"\nRunning trials...")
+        trial_data = []
 
         for trial in range(n_trials):
             if (trial + 1) % 10 == 0:
                 print(f'  Trial {trial + 1}/{n_trials}')
 
-            sig = self.calculator.generate_composite_sine(random_phase=True)
+            # Generate signal with random phase
+            sig = self.analyzer.generate_composite_sine(random_phase=True)
 
-            for pipe in self.calculator.PIPELINES:
-                df, _ = self.calculator.validate_pipeline(sig, pipe, ref_rqa, ref_data)
+            # Analyze each pipeline
+            for pipeline in self.analyzer.PIPELINES:
+                df = self.analyzer.analyze_pipeline(sig, pipeline, ground_truth, ground_truth_data)
 
-                all_trial_data.append(df)
-
-                results[pipe]['det_deviation'].append(df['det_deviation'].mean())
-                results[pipe]['lam_deviation'].append(df['lam_deviation'].mean())
-                results[pipe]['tt_deviation'].append(df['tt_deviation'].mean())
-                results[pipe]['hamming_distance'].append(df['hamming_distance'].mean())
-                results[pipe]['ibf'].append(df['ibf'].mean())
-                results[pipe]['rp_pattern_corr'].append(df['rp_pattern_corr'].mean())
-                results[pipe]['frobenius_distance'].append(df['frobenius_distance'].mean())
-
-        for pipeline in self.calculator.PIPELINES:
-            for metric in results[pipeline].keys():
-                results[pipeline][metric] = np.array(results[pipeline][metric])
-
-        master_df = pd.concat(all_trial_data, ignore_index=True)
-
-
-        df_inv = None
-        if include_aliasing:
-            df_inv = self.calculator.run_shift_invariance_analysis(n_trials=n_trials)
-
-        df_leakage = None
-        if include_leakage:
-            df_leakage = self.calculator.run_leakage_analysis(n_trials=n_trials)
-            print("Leakage analysis complete.\n")
-        df_der, df_alias_summary, df_stats = None, None, None
-        if include_aliasing and include_leakage:
-            df_der, df_alias_summary, df_stats = self.calculator.analyze_aliasing_and_leakage(df_inv, df_leakage)
-        elif include_leakage and df_leakage is not None:
-            df_der_list = []
-            for (pipe, trial), sub in df_leakage.groupby(['pipeline', 'trial']):
-                diag = sub[sub['input_sine'] == sub['output_subband']]['energy_fraction'].sum()
-                total = sub['energy_fraction'].sum()
-                df_der_list.append({
-                    'pipeline': pipe,
-                    'trial': trial,
-                    'DER': diag / total
-                })
-            df_der = pd.DataFrame(df_der_list)
-        master_csv_path = os.path.join(self.calculator.OUTPUT_DIR, 'master_results.csv')
-        master_df.to_csv(master_csv_path, index=False)
-
-        if include_leakage and df_leakage is not None:
-            self.plotter.plot_leakage_matrices(df_leakage)
-            if df_der is not None:
-                self.plotter.plot_deviation_leakage(df_der, self.plotter.output_dir)
-
-        if include_aliasing and df_inv is not None:
-            self.plotter.visualize_shift_invariance(df_inv)
-
-        self.run_statistical_comparison(n_trials)
-
-        self.plotter.visualize_absolute_metrics(master_df)
-
-        self.plotter.visualize_aggregated_structural_metrics_violin(master_df)
-
-        self.plotter.visualize_bar_comparison_pro(results, master_df, ref_rqa)
-
-        self.plotter.visualize_frobenius_distances(master_df)
-
-        summary_df = self.summarize_results(results)
-        summary_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'summary_metrics.csv'), index=False)
-
-        disc_df = self.compute_metric_discriminative_power(results)
-        disc_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'metric_discriminative_power.csv'), index=False)
-
-
-        return results, master_df, ref_rqa
-
-    def run_statistical_comparison(self, n_trials=100):
-        reference_rqa = None
-        reference_data = None
-
-        ref_path = os.path.join(self.calculator.OUTPUT_DIR, 'reference_rqa_values.json')
-        ref_data_path = os.path.join(self.calculator.OUTPUT_DIR, 'reference_rqa_values_data.npz')
-
-        if os.path.exists(ref_path):
-            print("Loading saved reference rqa values")
-            reference_rqa = self.calculator.load_reference_rqa_values(ref_path)
-            if os.path.exists(ref_data_path):
-                reference_data = self.calculator.load_reference_data(ref_data_path)
-        else:
-            print("No reference rqa data_old found, generating...")
-            reference_rqa = self.calculator.generate_reference_rqa_values(ref_path)
-            reference_data = self.calculator.load_reference_data(ref_data_path)
-        print()
-
-        results = {
-            'swt_recon': {'det_deviation': [], 'lam_deviation': [], 'tt_deviation': [],
-                         'hamming_distance': [], 'ibf': [], 'rp_pattern_corr': [], 'frobenius_distance': []},
-            'swt_direct': {'det_deviation': [], 'lam_deviation': [], 'tt_deviation': [],
-                          'hamming_distance': [], 'ibf': [], 'rp_pattern_corr': [], 'frobenius_distance': []},
-            'dwt_recon': {'det_deviation': [], 'lam_deviation': [], 'tt_deviation': [],
-                         'hamming_distance': [], 'ibf': [], 'rp_pattern_corr': [], 'frobenius_distance': []},
-            'dwt_direct': {'det_deviation': [], 'lam_deviation': [], 'tt_deviation': [],
-                          'hamming_distance': [], 'ibf': [], 'rp_pattern_corr': [], 'frobenius_distance': []},
-        }
-
-        pipelines = ['swt_recon', 'swt_direct', 'dwt_recon', 'dwt_direct']
-
-        all_trial_data = []
-
-        METRICS = ['det_deviation', 'lam_deviation', 'tt_deviation',
-                   'hamming_distance', 'ibf', 'rp_pattern_corr', 'frobenius_distance']
-
-        # One row per (trial, pipeline) — no band-level rows here
-        aggregated_rows = []
-
-        for trial in range(n_trials):
-            if (trial + 1) % 10 == 0:
-                print(f"  Trial {trial + 1}/{n_trials}...")
-
-            signal = self.calculator.generate_composite_sine(random_phase=True)
-
-            for pipeline in self.calculator.PIPELINES:
-                # Single call per pipeline per trial
-                df, _ = self.calculator.validate_pipeline(
-                    signal, pipeline,
-                    reference_rqa=reference_rqa,
-                    reference_data=reference_data
-                )
-
-                # Aggregate across bands — one observation per (trial, pipeline)
+                # Aggregate metrics across bands
                 row = {'trial': trial, 'pipeline': pipeline}
-                for metric in METRICS:
+                for metric in self.METRICS:
                     if metric in df.columns:
                         row[metric] = df[metric].mean()
-                aggregated_rows.append(row)
 
-        agg_df = pd.DataFrame(aggregated_rows)
+                trial_data.append(row)
 
-        # Statistical comparison: across n_trials observations per pipeline
-        comparisons = [
-            ('swt_recon', 'swt_direct', 'SWT Recon vs SWT Direct'),
-            ('swt_recon', 'dwt_recon', 'SWT Recon vs DWT Recon'),
-            ('swt_direct', 'dwt_recon', 'SWT Direct vs DWT Recon'),
-            ('dwt_direct', 'dwt_recon', 'DWT Direct vs DWT Recon'),
-            ('dwt_direct', 'swt_recon', 'DWT Direct vs SWT Recon'),
-            ('dwt_direct', 'swt_direct', 'DWT Direct vs SWT Direct'),
-        ]
+        # Save results
+        agg_df = pd.DataFrame(trial_data)
+        results_path = os.path.join(self.output_dir, 'pipeline_comparison_results.csv')
+        agg_df.to_csv(results_path, index=False)
+        print(f"\n✓ Results saved to {results_path}")
 
-        stats_results = []
-        for pipe1, pipe2, label in comparisons:
-            for metric in METRICS:
-                x = agg_df[agg_df['pipeline'] == pipe1][metric].dropna()
-                y = agg_df[agg_df['pipeline'] == pipe2][metric].dropna()
-                if len(x) < 3 or len(y) < 3:
-                    continue
+        # Statistical analysis
+        stats_df = self._run_statistical_analysis(agg_df)
 
-                u, p = mannwhitneyu(x, y, alternative='two-sided')
-                pooled = np.sqrt(((len(x) - 1) * x.var(ddof=1) +
-                                  (len(y) - 1) * y.var(ddof=1)) / (len(x) + len(y) - 2))
-                d = (x.mean() - y.mean()) / pooled if pooled > 1e-9 else np.nan
+        # Generate plots
+        print("\nGenerating visualizations...")
+        self.visualizer.plot_violin_comparisons(agg_df, self.METRICS)
+        self.visualizer.plot_boxplot_comparisons(agg_df, self.METRICS)
 
-                stats_results.append({
-                    'comparison': label, 'metric': metric,
-                    'pipeline1': pipe1, 'pipeline2': pipe2,
-                    'mean1': x.mean(), 'std1': x.std(),
-                    'mean2': y.mean(), 'std2': y.std(),
-                    'u_stat': u, 'p_value': p, 'cohens_d': d,
-                    'significance': '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
-                })
+        print(f"\n{'='*80}")
+        print("EXPERIMENT COMPLETE")
+        print(f"{'='*80}\n")
 
-        stats_df = pd.DataFrame(stats_results)
-        agg_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'aggregated_trial_metrics.csv'), index=False)
-        stats_df.to_csv(os.path.join(self.calculator.OUTPUT_DIR, 'stats_final.csv'), index=False)
         return agg_df, stats_df
 
-    def summarize_results(self, results):
-        summary = []
+    def _run_statistical_analysis(self, agg_df):
+        """
+        Perform statistical tests on pipeline comparison results.
 
-        for pipe, metrics in results.items():
-            for metric, values in metrics.items():
-                values = np.array(values)
+        Tests:
+        - Kruskal-Wallis: Overall differences across pipelines
+        - Dunn: Pairwise comparisons with Bonferroni correction
+        - Cohen's D: Effect sizes
 
-                summary.append({
-                    'pipeline': pipe,
-                    'metric': metric,
-                    'mean': values.mean(),
-                    'std': values.std()
-                })
+        Args:
+            agg_df: Aggregated results DataFrame
 
-        return pd.DataFrame(summary)
+        Returns:
+            DataFrame with statistical test results
+        """
+        print("\nRunning statistical analysis...")
 
-    def compute_metric_discriminative_power(self, results):
-        from scipy.stats import kruskal
+        stats_results = []
 
-        metrics = list(next(iter(results.values())).keys())
-        pipelines = list(results.keys())
+        for metric in self.METRICS:
+            # Prepare data for each pipeline
+            groups = [
+                agg_df[agg_df['pipeline'] == p][metric].dropna().values
+                for p in self.analyzer.PIPELINES
+            ]
 
-        rows = []
+            # Kruskal-Wallis test
+            h_stat, kw_pvalue = kruskal(*groups)
 
-        for metric in metrics:
-            data = [results[p][metric] for p in pipelines]
-
-            stat, p = kruskal(*data)
-
-            rows.append({
+            stats_results.append({
                 'metric': metric,
-                'kruskal_stat': stat,
-                'p_value': p
+                'test': 'Kruskal-Wallis',
+                'pipeline1': 'all',
+                'pipeline2': 'all',
+                'statistic': h_stat,
+                'p_value': kw_pvalue,
+                'cohens_d': np.nan,
+                'significance': self._get_significance(kw_pvalue)
             })
 
-        return pd.DataFrame(rows).sort_values('p_value')
+            # Dunn pairwise comparisons
+            dunn_df = posthoc_dunn(agg_df, val_col=metric, group_col='pipeline', p_adjust='bonferroni')
+
+            pipelines = self.analyzer.PIPELINES
+            for i, pipe1 in enumerate(pipelines):
+                for pipe2 in pipelines[i + 1:]:
+                    x = agg_df[agg_df['pipeline'] == pipe1][metric].dropna()
+                    y = agg_df[agg_df['pipeline'] == pipe2][metric].dropna()
+
+                    if len(x) < 3 or len(y) < 3:
+                        continue
+
+                    # Cohen's D
+                    pooled_std = np.sqrt(
+                        ((len(x) - 1) * x.var(ddof=1) + (len(y) - 1) * y.var(ddof=1)) /
+                        (len(x) + len(y) - 2)
+                    )
+                    cohens_d = (x.mean() - y.mean()) / pooled_std if pooled_std > 1e-9 else np.nan
+
+                    dunn_pvalue = dunn_df.loc[pipe1, pipe2]
+
+                    stats_results.append({
+                        'metric': metric,
+                        'test': 'Dunn',
+                        'pipeline1': pipe1,
+                        'pipeline2': pipe2,
+                        'statistic': np.nan,
+                        'p_value': dunn_pvalue,
+                        'cohens_d': cohens_d,
+                        'significance': self._get_significance(dunn_pvalue)
+                    })
+
+        # Save results
+        stats_df = pd.DataFrame(stats_results)
+        stats_path = os.path.join(self.output_dir, 'statistical_analysis.csv')
+        stats_df.to_csv(stats_path, index=False)
+        print(f"✓ Statistical analysis saved to {stats_path}")
+
+        return stats_df
+
+    @staticmethod
+    def _get_significance(p_value):
+        """Convert p-value to significance notation."""
+        if p_value < 0.001:
+            return '***'
+        elif p_value < 0.01:
+            return '**'
+        elif p_value < 0.05:
+            return '*'
+        else:
+            return 'ns'
+
 
 def main():
-    runner = ExperimentRunner(is_sine=True)
+    """Run pipeline comparison experiment with default parameters."""
 
-    results, master_df, ref_rqa = runner.run_full_experiment(
-        n_trials=100,
-        include_leakage=True,
-        include_aliasing=True
+    # Harmonic frequencies (all multiples of fundamental)
+    SUBBAND_FREQS_HARM = {
+        'A4': 2,
+        'D4': 6,    # 4-8 Hz
+        'D3': 12,   # 8-16 Hz
+        'D2': 24,   # 16-32 Hz
+        'D1': 48    # 32-64 Hz
+    }
+
+    # Non-harmonic frequencies
+    SUBBAND_FREQS_NON_HARM = {
+        'A4': 3,
+        'D4': 7,    # 4-8 Hz
+        'D3': 13,   # 8-16 Hz
+        'D2': 31,   # 16-32 Hz
+        'D1': 61    # 32-64 Hz
+    }
+
+    output_dir = '/Users/filipsulich/Developer/uni/Thesis/Thesis/src/decomposition_strategy_selection/results_test_harm2'
+
+    runner = ExperimentRunner(
+        subband_freqs=SUBBAND_FREQS_HARM,
+        output_dir=output_dir
     )
+
+    # Run experiment
+    agg_df, stats_df = runner.run_experiment(n_trials=100)
+
 
 if __name__ == '__main__':
     main()

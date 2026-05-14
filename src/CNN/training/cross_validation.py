@@ -12,16 +12,17 @@ from sklearn.model_selection import GroupKFold
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, roc_auc_score, average_precision_score,
-    confusion_matrix,
+    confusion_matrix, roc_curve,
 )
+from scipy import stats
 from PIL import Image
 from tqdm import tqdm
 
 from src.CNN.models.models import SingleScaleCNN, MultiScaleCNN
 
-H5_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8')
-PNG_DIR     = Path('/Users/filipsulich/Developer/uni/Thesis/dataset/images2')
-SAVE_DIR    = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/results_kfold2')
+H5_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_full_denoise_seed_42')
+PNG_DIR     = Path('/Users/filipsulich/Developer/uni/Thesis/dataset/images2_denoise')
+SAVE_DIR    = Path('/results_final/results_kfold2_denoise')
 
 MODEL_TYPE   = 'multi'
 
@@ -392,49 +393,6 @@ def plot_roc_curves(fold_probs_list: list, fold_labels_list: list,
     return mean_auc
 
 
-def plot_attention_weights(fold_weights: list,
-                            subband_names: list,
-                            save_path: Path) -> None:
-    """
-    Plot mean ± std attention weights across all folds as a bar chart.
-
-    Args:
-        fold_weights:   list of (n_subbands,) arrays, one per fold
-        subband_names:  ['D2','D3',...,'D8']
-        save_path:      where to save
-    """
-    weights  = np.array(fold_weights)        # (n_folds, n_subbands)
-    means    = weights.mean(axis=0)
-    stds     = weights.std(axis=0)
-
-    fig, ax = plt.subplots(figsize=(7, 4))
-    x = np.arange(len(subband_names))
-    ax.bar(x, means, yerr=stds, capsize=5,
-           color='steelblue', alpha=0.8, edgecolor='navy')
-    ax.set_xticks(x)
-    ax.set_xticklabels(subband_names, fontsize=11)
-    ax.set_xlabel('Subband', fontsize=12)
-    ax.set_ylabel('Mean attention weight (sigmoid)', fontsize=12)
-    ax.set_title('Mean attention weights across CV folds\n'
-                 '(mean ± std, 10 folds)', fontsize=12)
-    ax.set_ylim(0, 1)
-    ax.axhline(0.5, color='gray', linestyle='--', lw=1.2,
-               label='Uniform baseline (0.5)')
-    ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3, axis='y')
-    plt.tight_layout()
-
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"  Attention weights saved → {save_path}")
-
-    print("\nMean attention weights across folds:")
-    print(f"  {'Subband':<8} {'Mean':>8} {'Std':>8}")
-    print(f"  {'-'*26}")
-    for name, m, s in zip(subband_names, means, stds):
-        print(f"  {name:<8} {m:>8.4f} {s:>8.4f}")
-
 @torch.no_grad()
 def evaluate(model, loader, device) -> dict:
     model.eval()
@@ -453,7 +411,24 @@ def evaluate(model, loader, device) -> dict:
 
     auc  = roc_auc_score(all_labels, all_probs) if len(np.unique(all_labels)) > 1 else 0.5
     auprc = average_precision_score(all_labels, all_probs) if len(np.unique(all_labels)) > 1 else 0.5
-    cm   = confusion_matrix(all_labels, all_preds)
+
+    # Find optimal threshold using Youden's J statistic
+    if len(np.unique(all_labels)) > 1:
+        fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
+        j_scores = tpr - fpr
+        optimal_idx = np.argmax(j_scores)
+        optimal_threshold = thresholds[optimal_idx]
+        youdens_j = j_scores[optimal_idx]
+
+        # Convert probabilities to predictions using optimal threshold
+        all_preds_optimal = (all_probs >= optimal_threshold).astype(int)
+    else:
+        optimal_threshold = 0.5
+        youdens_j = 0.0
+        all_preds_optimal = all_preds
+
+    # Compute confusion matrix using optimal threshold
+    cm = confusion_matrix(all_labels, all_preds_optimal)
     tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
 
     return {
@@ -465,9 +440,10 @@ def evaluate(model, loader, device) -> dict:
         'specificity': float(tn / (tn + fp)) if tn + fp > 0 else 0.0,
         'precision':   float(precision_score(all_labels, all_preds, zero_division=0)),
         'recall':      float(recall_score(all_labels, all_preds, zero_division=0)),
+        'optimal_threshold': float(optimal_threshold),
+        'youdens_j': float(youdens_j),
         'tp': int(tp), 'tn': int(tn), 'fp': int(fp), 'fn': int(fn),
     }
-
 
 def aggregate(fold_results: list) -> dict:
     keys = fold_results[0].keys()
@@ -480,7 +456,6 @@ def aggregate(fold_results: list) -> dict:
         for k in keys
     }
 
-
 def get_subject_group(record_id: str) -> int:
     """Map record → subject group ID (paired records share a group)."""
     m = re.match(r'n(\d+)', record_id)
@@ -491,11 +466,6 @@ def get_subject_group(record_id: str) -> int:
         num = int(m.group(1))
         return 100 + num // 2   # p01/p02 → same group
     return -1
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Step 5 — K-Fold CV
-# ══════════════════════════════════════════════════════════════════════════════
 
 def run_kfold_cv(dataset: CombinedPNGDataset, model_type: str = 'multi') -> dict:
     groups   = np.array([get_subject_group(r) for r in dataset.record_ids])
@@ -655,7 +625,7 @@ def run_kfold_cv(dataset: CombinedPNGDataset, model_type: str = 'multi') -> dict
             fold_probs_uniform.append(va_probs_uniform)
             fold_labels_uniform.append(va_labels)
 
-            print(f"\n  Fold {fold} results:")
+            print(f"\n  Fold {fold} results_harm:")
             print(f"    Trained  AUC={m_trained['auc_roc']:.4f}  "
                   f"Sens={m_trained['sensitivity']:.3f}  "
                   f"Spec={m_trained['specificity']:.3f}")
@@ -680,7 +650,7 @@ def run_kfold_cv(dataset: CombinedPNGDataset, model_type: str = 'multi') -> dict
             'epochs': EPOCHS, 'patience': PATIENCE,
             'lr': LR, 'dropout': DROPOUT, 'seed': SEED,
         },
-        'trained_attention' if model_type == 'multi' else 'results': {
+        'trained_attention' if model_type == 'multi' else 'results_harm': {
             'aggregated': agg_trained,
             'per_fold':   trained_results,
         },
@@ -698,7 +668,7 @@ def run_kfold_cv(dataset: CombinedPNGDataset, model_type: str = 'multi') -> dict
             for k in ('auc_roc', 'auprc', 'sensitivity', 'specificity', 'f1'):
                 print(f"  {k:<15} {agg[k]['mean']:.4f} ± {agg[k]['std']:.4f}")
     else:
-        print(f"\n{model_type.upper()} results:")
+        print(f"\n{model_type.upper()} results_harm:")
         for k in ('auc_roc', 'auprc', 'sensitivity', 'specificity', 'f1'):
             print(f"  {k:<15} {agg_trained[k]['mean']:.4f} ± {agg_trained[k]['std']:.4f}")
 
@@ -722,10 +692,7 @@ def run_kfold_cv(dataset: CombinedPNGDataset, model_type: str = 'multi') -> dict
             save_path=SAVE_DIR / 'roc_uniform.png',
             colour='#ff7f0e',
         )
-        plot_attention_weights(
-            fold_attn_weights, subband_names,
-            save_path=SAVE_DIR / 'attention_weights_cv.png',
-        )
+
         # Save raw attention weights for ablation subband selection
         attn_array = np.array(fold_attn_weights)  # (n_folds, n_subbands)
         np.save(SAVE_DIR / 'fold_attention_weights.npy', attn_array)
@@ -772,7 +739,698 @@ class AugmentedSubset(Dataset):
         return torch.from_numpy(x.astype(np.float32)), label
 
 
+def run_ablation_study(png_dir: Path, base_save_dir: Path) -> dict:
+    """
+    Run ablation study on multi-scale CNN with three different subband configurations.
+
+    Uses existing PNG files (e.g., 000000_D2.png, 000000_D3.png, etc.) and filters
+    which subbands are loaded for each configuration:
+
+    1. Lower frequencies: D2, D3, D4
+    2. Higher frequencies: D5, D6, D7, D8
+    3. Selected frequencies: D2, D4, D7
+
+    Each configuration is trained with 10-fold cross-validation and saved to a separate folder.
+
+    Args:
+        png_dir: Directory containing existing PNG images (000000_D2.png, etc.)
+        base_save_dir: Base directory for saving results (e.g., results_kfold2/ablation)
+
+    Returns:
+        dict: Combined results from all three configurations
+    """
+
+    # Define three ablation configurations
+    ablation_configs = {
+        'lower_freq': {
+            'subbands': ['D2', 'D3', 'D4'],
+            'description': 'Lower frequencies (D2, D3, D4)',
+            'folder': 'lower_freq_d234'
+        },
+        'higher_freq': {
+            'subbands': ['D5', 'D6', 'D7', 'D8'],
+            'description': 'Higher frequencies (D5, D6, D7, D8)',
+            'folder': 'higher_freq_d5678'
+        },
+        'selected_freq': {
+            'subbands': ['D2', 'D4', 'D7'],
+            'description': 'Selected frequencies (D2, D4, D7)',
+            'folder': 'selected_freq_d247'
+        }
+    }
+
+    all_results = {}
+
+    print("\n" + "="*80)
+    print("ABLATION STUDY - Multi-scale CNN with Different Subband Configurations")
+    print("="*80)
+    print(f"Using existing PNG files from: {png_dir}")
+
+    for config_name, config in ablation_configs.items():
+        print(f"\n{'='*80}")
+        print(f"Configuration: {config['description']}")
+        print(f"Subbands: {config['subbands']}")
+        print(f"{'='*80}")
+
+        # Filter existing PNG files to load only specified subbands
+        # E.g., for ['D2', 'D3', 'D4'], only loads 000000_D2.png, 000000_D3.png, 000000_D4.png
+        dataset = CombinedPNGDataset(
+            png_dir,
+            mode='multi',
+            subband_keys=config['subbands'],  # Filters which PNGs to load
+            cache=True
+        )
+
+        # Set up save directory for this configuration
+        config_save_dir = base_save_dir / config['folder']
+        config_save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Temporarily override global SAVE_DIR
+        global SAVE_DIR
+        original_save_dir = SAVE_DIR
+        SAVE_DIR = config_save_dir
+
+        # Update N_SUBBANDS for the model
+        global N_SUBBANDS
+        original_n_subbands = N_SUBBANDS
+        N_SUBBANDS = len(config['subbands'])
+
+        print(f"\nSave directory: {config_save_dir}")
+        print(f"Number of subbands: {N_SUBBANDS}")
+        print(f"Total samples: {len(dataset)}")
+
+        # Run k-fold cross-validation
+        results = run_kfold_cv(dataset, model_type='multi')
+
+        # Add configuration metadata to results
+        results['ablation_config'] = {
+            'name': config_name,
+            'description': config['description'],
+            'subbands': config['subbands'],
+            'n_subbands': len(config['subbands'])
+        }
+
+        # Save configuration-specific results
+        config_results_path = config_save_dir / 'ablation_results.json'
+        with open(config_results_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"\n✓ Configuration results saved → {config_results_path}")
+
+        # Store in combined results
+        all_results[config_name] = results
+
+        # Restore global settings
+        SAVE_DIR = original_save_dir
+        N_SUBBANDS = original_n_subbands
+
+    # Save combined results
+    print("\n" + "="*80)
+    print("ABLATION STUDY COMPLETE")
+    print("="*80)
+
+    combined_results_path = base_save_dir / 'ablation_study_combined.json'
+    with open(combined_results_path, 'w') as f:
+        json.dump(all_results, f, indent=2)
+    print(f"\n✓ Combined ablation results saved → {combined_results_path}")
+
+    # Print summary comparison
+    print("\n" + "="*80)
+    print("ABLATION STUDY SUMMARY")
+    print("="*80)
+
+    for config_name, config in ablation_configs.items():
+        results = all_results[config_name]
+        agg = results['trained_attention']['aggregated']
+
+        print(f"\n{config['description']}")
+        print(f"  Subbands: {', '.join(config['subbands'])}")
+        print(f"  AUC-ROC:  {agg['auc_roc']['mean']:.4f} ± {agg['auc_roc']['std']:.4f}")
+        print(f"  AUPRC:    {agg['auprc']['mean']:.4f} ± {agg['auprc']['std']:.4f}")
+        print(f"  Sens:     {agg['sensitivity']['mean']:.4f} ± {agg['sensitivity']['std']:.4f}")
+        print(f"  Spec:     {agg['specificity']['mean']:.4f} ± {agg['specificity']['std']:.4f}")
+        print(f"  F1:       {agg['f1']['mean']:.4f} ± {agg['f1']['std']:.4f}")
+
+    return all_results
+
+
+def plot_ablation_comparison(ablation_base_dir: Path, full_model_dir: Path,
+                             metric: str = 'auc_roc', save_path: Path = None):
+    """
+    Create a bar chart comparing ablation configurations with the full multi-scale model.
+
+    Args:
+        ablation_base_dir: Directory containing ablation study results
+        full_model_dir: Directory containing full multi-scale model results
+        metric: Metric to plot ('auc_roc', 'auprc', 'sensitivity', 'specificity', 'f1')
+        save_path: Path to save the plot (if None, saves to ablation_base_dir)
+
+    Returns:
+        dict: Comparison data
+    """
+    import matplotlib.pyplot as plt
+
+    # Metric display names
+    metric_names = {
+        'auc_roc': 'AUC-ROC',
+        'auprc': 'AUPRC',
+        'sensitivity': 'Sensitivity',
+        'specificity': 'Specificity',
+        'f1': 'F1-Score'
+    }
+
+    # Load ablation results
+    ablation_file = ablation_base_dir / 'ablation_study_combined.json'
+    if not ablation_file.exists():
+        raise FileNotFoundError(f"Ablation results not found: {ablation_file}")
+
+    with open(ablation_file, 'r') as f:
+        ablation_data = json.load(f)
+
+    # Load full model results
+    full_model_file = full_model_dir / 'kfold_results.json'
+    if not full_model_file.exists():
+        raise FileNotFoundError(f"Full model results not found: {full_model_file}")
+
+    with open(full_model_file, 'r') as f:
+        full_model_data = json.load(f)
+
+    # Extract metric values for each configuration
+    configs = {
+        'Lower Freq\n(D2, D3, D4)': {
+            'data': ablation_data['lower_freq'],
+            'color': '#1f77b4'
+        },
+        'Higher Freq\n(D5, D6, D7, D8)': {
+            'data': ablation_data['higher_freq'],
+            'color': '#ff7f0e'
+        },
+        'Selected Freq\n(D2, D4, D7)': {
+            'data': ablation_data['selected_freq'],
+            'color': '#2ca02c'
+        },
+        'Full Multi-scale\n(All 7 subbands)': {
+            'data': full_model_data,
+            'color': '#d62728'
+        }
+    }
+
+    # Extract means and stds
+    config_names = []
+    means = []
+    stds = []
+    colors = []
+
+    for name, info in configs.items():
+        config_names.append(name)
+        colors.append(info['color'])
+
+        # Get the aggregated results (trained attention)
+        agg = info['data']['trained_attention']['aggregated']
+        means.append(agg[metric]['mean'])
+        stds.append(agg[metric]['std'])
+
+    # Create bar chart
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    x_pos = np.arange(len(config_names))
+    bars = ax.bar(x_pos, means, yerr=stds, capsize=8, alpha=0.8,
+                   color=colors, edgecolor='black', linewidth=1.5)
+
+    # Customize plot
+    ax.set_xlabel('Model Configuration', fontsize=14, fontweight='bold')
+    ax.set_ylabel(f'{metric_names.get(metric, metric)}', fontsize=14, fontweight='bold')
+    ax.set_title(f'Ablation Study: {metric_names.get(metric, metric)} Comparison\n10-Fold Cross-Validation',
+                 fontsize=16, fontweight='bold', pad=20)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(config_names, fontsize=11)
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    # Add value labels on bars
+    for i, (bar, mean, std) in enumerate(zip(bars, means, stds)):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2., height + std + 0.01,
+                f'{mean:.4f}\n±{std:.4f}',
+                ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # Add horizontal line at baseline (full model)
+    full_model_mean = means[-1]
+    ax.axhline(y=full_model_mean, color='red', linestyle='--', linewidth=2,
+               alpha=0.5, label=f'Full Model Baseline ({full_model_mean:.4f})')
+    ax.legend(fontsize=11, loc='lower right')
+
+    plt.tight_layout()
+
+    # Save plot
+    if save_path is None:
+        save_path = ablation_base_dir / f'ablation_comparison_{metric}.png'
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"\n✓ Comparison plot saved → {save_path}")
+
+    # Print comparison table
+    print(f"\n{'='*80}")
+    print(f"ABLATION STUDY COMPARISON - {metric_names.get(metric, metric)}")
+    print(f"{'='*80}")
+    print(f"{'Configuration':<30} {'Mean':<12} {'Std':<12} {'Diff from Full':<15}")
+    print(f"{'-'*80}")
+
+    for i, (name, mean, std) in enumerate(zip(config_names, means, stds)):
+        diff = mean - means[-1]  # Difference from full model
+        diff_str = f"{diff:+.4f}" if i < len(config_names) - 1 else "baseline"
+        name_clean = name.replace('\n', ' ')
+        print(f"{name_clean:<30} {mean:.4f}      ±{std:.4f}      {diff_str:<15}")
+
+    # Return comparison data
+    comparison_data = {
+        'metric': metric,
+        'configurations': {
+            name.replace('\n', ' '): {
+                'mean': float(mean),
+                'std': float(std),
+                'diff_from_full': float(mean - means[-1]) if i < len(config_names) - 1 else 0.0
+            }
+            for i, (name, mean, std) in enumerate(zip(config_names, means, stds))
+        }
+    }
+
+    return comparison_data
+
+
+def plot_all_ablation_metrics(ablation_base_dir: Path, full_model_dir: Path):
+    """
+    Generate comparison plots for all metrics (AUC-ROC, AUPRC, Sensitivity, Specificity, F1).
+
+    Args:
+        ablation_base_dir: Directory containing ablation study results
+        full_model_dir: Directory containing full multi-scale model results
+
+    Returns:
+        dict: Comparison data for all metrics
+    """
+    metrics = ['auc_roc', 'auprc', 'sensitivity', 'specificity', 'f1']
+    all_comparisons = {}
+
+    print("\n" + "="*80)
+    print("GENERATING ABLATION COMPARISON PLOTS FOR ALL METRICS")
+    print("="*80)
+
+    for metric in metrics:
+        print(f"\nGenerating plot for {metric}...")
+        comparison = plot_ablation_comparison(ablation_base_dir, full_model_dir, metric)
+        all_comparisons[metric] = comparison
+
+    # Save combined comparison data
+    output_path = ablation_base_dir / 'all_metrics_comparison.json'
+    with open(output_path, 'w') as f:
+        json.dump(all_comparisons, f, indent=2)
+    print(f"\n✓ All metrics comparison data saved → {output_path}")
+
+    return all_comparisons
+
+
+def plot_ablation_boxplot(ablation_base_dir: Path, full_model_dir: Path,
+                          single_model_dir: Path, metric: str = 'auc_roc'):
+    """
+    Create boxplot showing per-fold metric distribution for all 5 configurations.
+
+    Configurations (left to right):
+    1. Single-scale (anchor/baseline)
+    2. Lower freq (D2, D3, D4)
+    3. Higher freq (D5, D6, D7, D8)
+    4. Selected freq (D2, D4, D7)
+    5. Full multi-scale (all 7 subbands - anchor/best)
+
+    Args:
+        ablation_base_dir: Directory containing ablation study results
+        full_model_dir: Directory containing full multi-scale model results
+        single_model_dir: Directory containing single-scale model results
+        metric: Metric to plot (default: 'auc_roc')
+
+    Returns:
+        dict: Boxplot data for all configurations
+    """
+    import matplotlib.pyplot as plt
+
+    # Metric display names
+    metric_names = {
+        'auc_roc': 'AUC-ROC',
+        'auprc': 'AUPRC',
+        'sensitivity': 'Sensitivity',
+        'specificity': 'Specificity',
+        'f1': 'F1-Score'
+    }
+
+    print(f"\n{'='*80}")
+    print(f"GENERATING ABLATION BOXPLOT FOR {metric_names.get(metric, metric)}")
+    print(f"{'='*80}")
+
+    # Load ablation results
+    ablation_file = ablation_base_dir / 'ablation_study_combined.json'
+    if not ablation_file.exists():
+        raise FileNotFoundError(f"Ablation results not found: {ablation_file}")
+
+    with open(ablation_file, 'r') as f:
+        ablation_data = json.load(f)
+
+    # Load full multi-scale model results
+    full_model_file = full_model_dir / 'kfold_results.json'
+    if not full_model_file.exists():
+        raise FileNotFoundError(f"Full model results not found: {full_model_file}")
+
+    with open(full_model_file, 'r') as f:
+        full_model_data = json.load(f)
+
+    # Load single-scale model results
+    single_model_file = single_model_dir / 'kfold_results.json'
+    if not single_model_file.exists():
+        raise FileNotFoundError(f"Single model results not found: {single_model_file}")
+
+    with open(single_model_file, 'r') as f:
+        single_model_data = json.load(f)
+
+    # Extract per-fold values for each configuration (trained attention only)
+    configs = [
+        {
+            'name': 'Single-scale',
+            'label': 'Single-scale\n(baseline)',
+            'values': single_model_data['results']['aggregated'][metric]['values'],
+            'color': '#7f7f7f'  # Gray
+        },
+        {
+            'name': 'Higher Freq (D2-D4)',
+            'label': 'Higher Freq\n(D2, D3, D4)',
+            'values': ablation_data['lower_freq']['trained_attention']['aggregated'][metric]['values'],
+            'color': '#1f77b4'  # Blue
+        },
+        {
+            'name': 'Lower Freq (D5-D8)',
+            'label': 'Lower Freq\n(D5, D6, D7, D8)',
+            'values': ablation_data['higher_freq']['trained_attention']['aggregated'][metric]['values'],
+            'color': '#ff7f0e'  # Orange
+        },
+        {
+            'name': 'Selected Freq (D2,D4,D7)',
+            'label': 'Selected Freq\n(D2, D4, D7)',
+            'values': ablation_data['selected_freq']['trained_attention']['aggregated'][metric]['values'],
+            'color': '#2ca02c'  # Green
+        },
+        {
+            'name': 'Full Multi-scale',
+            'label': 'Full Multi-scale\n(All 7 subbands)',
+            'values': full_model_data['trained_attention']['aggregated'][metric]['values'],
+            'color': '#d62728'  # Red
+        }
+    ]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    # Prepare data for boxplot
+    data_to_plot = [config['values'] for config in configs]
+    labels = [config['label'] for config in configs]
+    colors = [config['color'] for config in configs]
+
+    # Create boxplot
+    bp = ax.boxplot(data_to_plot, labels=labels, patch_artist=True,
+                    widths=0.6, showmeans=True,
+                    meanprops=dict(marker='D', markerfacecolor='white',
+                                  markeredgecolor='black', markersize=8),
+                    medianprops=dict(color='black', linewidth=2),
+                    boxprops=dict(linewidth=1.5),
+                    whiskerprops=dict(linewidth=1.5),
+                    capprops=dict(linewidth=1.5))
+
+    # Color the boxes
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+
+    # Add grid
+    ax.grid(axis='y', alpha=0.3, linestyle='--', zorder=0)
+    ax.set_axisbelow(True)
+
+    # Labels and title
+    ax.set_ylabel(f'{metric_names.get(metric, metric)}', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Model Configuration', fontsize=14, fontweight='bold')
+    ax.set_title(f'Ablation Study: Per-Fold {metric_names.get(metric, metric)} Distribution\n'
+                f'10-Fold Cross-Validation (Trained Attention)',
+                fontsize=15, fontweight='bold', pad=20)
+
+    # Rotate x-axis labels for better readability
+    plt.xticks(fontsize=11, rotation=0)
+    plt.yticks(fontsize=11)
+
+    # Add legend explaining boxplot elements
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='white', edgecolor='black', label='Box: IQR (25th-75th percentile)'),
+        plt.Line2D([0], [0], color='black', linewidth=2, label='Line: Median'),
+        plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='white',
+                  markeredgecolor='black', markersize=8, label='Diamond: Mean')
+    ]
+    ax.legend(handles=legend_elements, loc='lower right', fontsize=10, framealpha=0.95)
+
+    plt.tight_layout()
+
+    # Save plot
+    output_path_pdf = ablation_base_dir / f'ablation_boxplot_{metric}.pdf'
+    plt.savefig(output_path_pdf, bbox_inches='tight')
+    print(f"\n✓ Boxplot saved (PDF) → {output_path_pdf}")
+
+    output_path_png = ablation_base_dir / f'ablation_boxplot_{metric}.png'
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    print(f"✓ Boxplot saved (PNG) → {output_path_png}")
+
+    plt.close()
+
+    # Print summary statistics
+    print(f"\n{'='*80}")
+    print(f"SUMMARY STATISTICS - {metric_names.get(metric, metric)}")
+    print(f"{'='*80}")
+    print(f"{'Configuration':<30} {'Mean':<10} {'Median':<10} {'Std':<10} {'Min':<10} {'Max':<10}")
+    print(f"{'-'*80}")
+
+    for config in configs:
+        values = np.array(config['values'])
+        mean_val = np.mean(values)
+        median_val = np.median(values)
+        std_val = np.std(values)
+        min_val = np.min(values)
+        max_val = np.max(values)
+
+        name = config['name']
+        print(f"{name:<30} {mean_val:<10.4f} {median_val:<10.4f} {std_val:<10.4f} "
+              f"{min_val:<10.4f} {max_val:<10.4f}")
+
+    print(f"{'='*80}\n")
+
+    # Return data
+    boxplot_data = {
+        'metric': metric,
+        'configurations': {
+            config['name']: {
+                'values': config['values'],
+                'mean': float(np.mean(config['values'])),
+                'median': float(np.median(config['values'])),
+                'std': float(np.std(config['values'])),
+                'min': float(np.min(config['values'])),
+                'max': float(np.max(config['values']))
+            }
+            for config in configs
+        }
+    }
+
+    # Save boxplot data
+    output_data_path = ablation_base_dir / f'ablation_boxplot_{metric}_data.json'
+    with open(output_data_path, 'w') as f:
+        json.dump(boxplot_data, f, indent=2)
+    print(f"✓ Boxplot data saved → {output_data_path}\n")
+
+    return boxplot_data
+
+
+def perform_ablation_statistical_tests(ablation_base_dir: Path, full_model_dir: Path,
+                                       metric: str = 'auc_roc'):
+    """
+    Perform pairwise Wilcoxon signed-rank tests between the four multi-scale configurations:
+    - Full (all 7 subbands: D2-D8)
+    - D2-D4 (higher frequency)
+    - D5-D8 (lower frequency)
+    - D2, D4, D7 (selected frequency)
+
+    Args:
+        ablation_base_dir: Directory containing ablation study results
+        full_model_dir: Directory containing full multi-scale model results
+        metric: Metric to test (default: 'auc_roc')
+
+    Returns:
+        dict: Statistical test results with p-values and effect sizes
+    """
+    # Metric display names
+    metric_names = {
+        'auc_roc': 'AUC-ROC',
+        'auprc': 'AUPRC',
+        'sensitivity': 'Sensitivity',
+        'specificity': 'Specificity',
+        'f1': 'F1-Score'
+    }
+
+    print(f"\n{'='*80}")
+    print(f"ABLATION STUDY: STATISTICAL COMPARISON - {metric_names.get(metric, metric)}")
+    print(f"{'='*80}")
+
+    # Load ablation results
+    ablation_file = ablation_base_dir / 'ablation_study_combined.json'
+    if not ablation_file.exists():
+        raise FileNotFoundError(f"Ablation results not found: {ablation_file}")
+
+    with open(ablation_file, 'r') as f:
+        ablation_data = json.load(f)
+
+    # Load full multi-scale model results
+    full_model_file = full_model_dir / 'kfold_results.json'
+    if not full_model_file.exists():
+        raise FileNotFoundError(f"Full model results not found: {full_model_file}")
+
+    with open(full_model_file, 'r') as f:
+        full_model_data = json.load(f)
+
+    # Extract per-fold values for the four configurations
+    configs = {
+        'Full (D2-D8)': np.array(full_model_data['trained_attention']['aggregated'][metric]['values']),
+        'D2-D4': np.array(ablation_data['lower_freq']['trained_attention']['aggregated'][metric]['values']),
+        'D5-D8': np.array(ablation_data['higher_freq']['trained_attention']['aggregated'][metric]['values']),
+        'D2,D4,D7': np.array(ablation_data['selected_freq']['trained_attention']['aggregated'][metric]['values'])
+    }
+
+    # Helper function to compute Cohen's d
+    def cohens_d(group1, group2):
+        """Compute Cohen's d effect size."""
+        diff = np.mean(group1) - np.mean(group2)
+        pooled_std = np.sqrt((np.var(group1, ddof=1) + np.var(group2, ddof=1)) / 2)
+        return diff / pooled_std if pooled_std > 0 else 0.0
+
+    # Perform pairwise comparisons
+    config_names = list(configs.keys())
+    results = {
+        'metric': metric,
+        'display_name': metric_names.get(metric, metric),
+        'configurations': {
+            name: {
+                'values': configs[name].tolist(),
+                'mean': float(np.mean(configs[name])),
+                'std': float(np.std(configs[name], ddof=1)),
+                'median': float(np.median(configs[name]))
+            }
+            for name in config_names
+        },
+        'pairwise_comparisons': {}
+    }
+
+    print(f"\nConfiguration Summary:")
+    print(f"{'Configuration':<20} {'Mean':<12} {'Std':<12} {'Median':<12}")
+    print(f"{'-'*60}")
+    for name in config_names:
+        mean_val = results['configurations'][name]['mean']
+        std_val = results['configurations'][name]['std']
+        median_val = results['configurations'][name]['median']
+        print(f"{name:<20} {mean_val:<12.4f} {std_val:<12.4f} {median_val:<12.4f}")
+
+    print(f"\n{'='*80}")
+    print("PAIRWISE STATISTICAL TESTS (Wilcoxon Signed-Rank Test)")
+    print(f"{'='*80}")
+    print(f"{'Comparison':<35} {'Δ Mean':<12} {'p-value':<12} {'Cohen d':<12} {'Sig.'}")
+    print(f"{'-'*80}")
+
+    # Perform all pairwise comparisons
+    for i, name1 in enumerate(config_names):
+        for name2 in config_names[i+1:]:
+            values1 = configs[name1]
+            values2 = configs[name2]
+
+            # Wilcoxon signed-rank test (paired, non-parametric)
+            statistic, p_value = stats.wilcoxon(values1, values2, alternative='two-sided')
+
+            # Cohen's d effect size
+            effect_size = cohens_d(values1, values2)
+
+            # Mean difference
+            mean_diff = np.mean(values1) - np.mean(values2)
+
+            # Determine significance
+            if p_value < 0.001:
+                significance = '***'
+            elif p_value < 0.01:
+                significance = '**'
+            elif p_value < 0.05:
+                significance = '*'
+            else:
+                significance = 'ns'
+
+            # Store results
+            comparison_key = f"{name1} vs {name2}"
+            results['pairwise_comparisons'][comparison_key] = {
+                'config1': name1,
+                'config2': name2,
+                'config1_mean': float(np.mean(values1)),
+                'config2_mean': float(np.mean(values2)),
+                'mean_difference': float(mean_diff),
+                'wilcoxon': {
+                    'statistic': float(statistic),
+                    'p_value': float(p_value),
+                    'significance': significance
+                },
+                'cohens_d': float(effect_size),
+                'interpretation': (
+                    'negligible' if abs(effect_size) < 0.2 else
+                    'small' if abs(effect_size) < 0.5 else
+                    'medium' if abs(effect_size) < 0.8 else
+                    'large'
+                )
+            }
+
+            # Print row
+            print(f"{comparison_key:<35} {mean_diff:<+12.4f} {p_value:<12.4f} "
+                  f"{effect_size:<+12.4f} {significance}")
+
+    print(f"{'-'*80}")
+    print("\nSignificance levels: *** p<0.001, ** p<0.01, * p<0.05, ns = not significant")
+    print("Cohen's d interpretation: <0.2 (negligible), 0.2-0.5 (small), "
+          "0.5-0.8 (medium), >0.8 (large)")
+    print(f"{'='*80}\n")
+
+    # Save results to JSON
+    output_path = ablation_base_dir / f'ablation_statistical_tests_{metric}.json'
+    with open(output_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"✓ Statistical test results saved → {output_path}\n")
+
+    return results
+
+
 if __name__ == '__main__':
     extract_h5_to_png(H5_DIR, PNG_DIR, splits=('train', 'val'))
     dataset = CombinedPNGDataset(PNG_DIR, mode=MODEL_TYPE, cache=True)
     results = run_kfold_cv(dataset, model_type=MODEL_TYPE)
+
+    # Run ablation study
+    # extract_h5_to_png(H5_DIR, PNG_DIR, splits=('train', 'val'))
+    # ablation_base_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/results_kfold2/ablation')
+    # ablation_results = run_ablation_study(PNG_DIR, ablation_base_dir)
+
+    # Generate comparison plots
+    full_model_dir = Path('/results_final/results_kfold2/multi')
+    single_model_dir = Path('/results_final/results_kfold2/single')
+
+    # Bar chart comparisons for all metrics
+    # plot_all_ablation_metrics(ablation_base_dir, full_model_dir)
+
+    # Boxplot showing per-fold distribution (AUC-ROC by default)
+    # plot_ablation_boxplot(ablation_base_dir, full_model_dir, single_model_dir, metric='auc_roc')
+
+    # Perform statistical tests between the four multi-scale configurations for all metrics
+    # metrics_to_test = ['auc_roc', 'auprc', 'sensitivity', 'specificity']
+    # for metric in metrics_to_test:
+    #     perform_ablation_statistical_tests(ablation_base_dir, full_model_dir, metric=metric)

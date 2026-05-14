@@ -109,6 +109,7 @@ class MultiScaleCNN(nn.Module):
     def __init__(self, n_subbands: int = 4, dropout: float = 0.5):
         super().__init__()
         self.n_subbands = n_subbands
+        self.use_uniform_attention = False  # Flag for uniform vs learned attention
 
         # Independent backbone per subband
         self.branches = nn.ModuleList([
@@ -159,10 +160,16 @@ class MultiScaleCNN(nn.Module):
         # Stack: (B, n_subbands, 64)
         stacked = torch.stack(branch_feats, dim=1)
 
-        # Compute attention weights from all features combined
-        # (B, n_subbands*64) → (B, n_subbands)
-        flat = stacked.reshape(stacked.size(0), -1)
-        weights = self.attention(flat)  # (B, n_subbands)
+        # Compute attention weights
+        if self.use_uniform_attention:
+            # Use uniform weights (1/n_subbands for each branch)
+            batch_size = stacked.size(0)
+            weights = torch.ones(batch_size, self.n_subbands, device=x.device) / self.n_subbands
+        else:
+            # Use learned attention weights
+            # (B, n_subbands*64) → (B, n_subbands)
+            flat = stacked.reshape(stacked.size(0), -1)
+            weights = self.attention(flat)  # (B, n_subbands)
 
         # Weighted sum of branch features
         # weights: (B, n_subbands, 1), stacked: (B, n_subbands, 64)
@@ -182,6 +189,17 @@ class MultiScaleCNN(nn.Module):
             stacked = torch.stack(branch_feats, dim=1)
             flat = stacked.reshape(stacked.size(0), -1)
             return self.attention(flat)  # (B, n_subbands)
+
+    def set_uniform_attention(self):
+        """
+        Replace learned attention weights with uniform weights (1/n_subbands).
+        Useful for ablation studies to see the effect of learned vs uniform attention.
+        """
+        self.use_uniform_attention = True
+
+    def set_learned_attention(self):
+        """Restore learned attention weights (default behavior)."""
+        self.use_uniform_attention = False
 
     def _init_weights(self):
         for m in self.modules():

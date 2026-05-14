@@ -12,7 +12,7 @@ import wfdb
 from scipy import signal as sp_signal
 import os
 import sys
-
+import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,19 +21,19 @@ from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerat
 warnings.filterwarnings('ignore')
 
 DATA_DIR        = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf')
-OUTPUT_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_denoise')
+OUTPUT_DIR      = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_no_denoise_seed_42')
 
 FS_ORIG         = 128
 FS_TARGET       = 500
 SEGMENT_SAMPLES = FS_TARGET * 10
 N_SEGMENTS      = 15
 UTRP_SIZE       = 256
-PAD_SAMPLES     = 8192
 
 WAVELET         = 'db8'
 SUBBAND_LEVELS  = [2, 3, 4, 5, 6, 7, 8]
 N_LEVELS_SWT    = 10
 EPSILON_FRAC    = 0.10
+PAD_SAMPLES = math.ceil(SEGMENT_SAMPLES / 2**N_LEVELS_SWT) * 2**N_LEVELS_SWT #this is 5120
 
 
 
@@ -41,13 +41,96 @@ def _minmax(x: np.ndarray) -> np.ndarray:
     lo, hi = x.min(), x.max()
     return (x - lo) / (hi - lo + 1e-9)
 
-
 def _pad(x: np.ndarray) -> np.ndarray:
     pad = PAD_SAMPLES - len(x)
     if pad <= 0:
         return x[:PAD_SAMPLES]
     return np.pad(x, (0, pad), mode='reflect')
 
+def _denoise_coefficients(coeffs: List[Tuple[np.ndarray, np.ndarray]]) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """
+    Apply adaptive wavelet denoising to SWT coefficients.
+
+    Uses Donoho & Johnstone (1994) soft thresholding:
+    - Threshold T = sigma * sqrt(2 * log(N))
+    - sigma = median(|cD|) / 0.6745 (robust MAD estimator)
+    - N = log2(fs / f_low) for frequency-adaptive threshold
+
+    Args:
+        coeffs: List of (cA, cD) coefficient tuples from pywt.swt
+
+    Returns:
+        Denoised coefficients with soft-thresholded detail coefficients
+    """
+    N_log = math.log2(500 / 0.5)  # Donoho level count
+    denoised_coeffs = []
+
+    for cA, cD in coeffs:
+        # Robust noise estimation using MAD
+        sigma = np.median(np.abs(cD)) / 0.6745
+        # Compute threshold
+        T = sigma * math.sqrt(2.0 * math.log(N_log))
+        # Soft thresholding: sign(x) * max(|x| - T, 0)
+        cD_denoised = np.sign(cD) * np.maximum(np.abs(cD) - T, 0.0)
+        denoised_coeffs.append((cA, cD_denoised))
+
+    return denoised_coeffs
+
+def _reconstruct_subband(
+                        signal: np.ndarray,
+                        wavelet: str,
+                        level: int) -> np.ndarray:
+    """
+    Reconstruct a single subband by zeroing all other coefficients.
+
+    If denoising is enabled, applies soft-thresholding to all detail
+    coefficients before reconstruction.
+
+    Args:
+        signal: Input signal
+        wavelet: Wavelet name (e.g., 'db8')
+        level: Subband level to reconstruct (2-8)
+
+    Returns:
+        Reconstructed subband signal
+    """
+    try:
+        original_len = len(signal)
+        signal_padded = _pad(signal)
+
+        # Perform 10-level SWT
+        coeffs = pywt.swt(signal_padded, wavelet, level=10)
+        # coeffs = [(cA10, cD10), (cA9, cD9), ..., (cA1, cD1)]
+        # Index mapping: level j is at index (n_levels - j)
+
+        # Apply denoising if enabled
+        coeffs = _denoise_coefficients(coeffs)
+
+        n_lvls = len(coeffs)
+        target_idx = n_lvls - level
+
+        # Create zero coefficients except for target level
+        reconstructed_coeffs = [
+            (np.zeros_like(cA), np.zeros_like(cD))
+            for cA, cD in coeffs
+        ]
+
+        # Keep only target subband's detail coefficients
+        if target_idx < len(reconstructed_coeffs):
+            # Zero the approximation, keep the detail
+            reconstructed_coeffs[target_idx] = (
+                np.zeros_like(coeffs[target_idx][0]),
+                coeffs[target_idx][1]
+            )
+
+        # Inverse SWT
+        recon = pywt.iswt(reconstructed_coeffs, wavelet)
+
+        # Trim to original length
+        return recon[:original_len].astype(np.float32)
+    except Exception as e:
+        print(f"    [ERROR] Reconstruction failed for {wavelet} D{level}: {e}")
+        return np.zeros_like(signal, dtype=np.float32)
 
 def extract_subbands_no_denoise(
         signal_padded: np.ndarray,
@@ -76,7 +159,6 @@ def denoise_single_scale(
         wavelet: str = WAVELET,
         n_levels: int = N_LEVELS_SWT,
 ):
-    import math
     coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
 
     N_log = math.log2(FS_TARGET / 0.5)  # Donoho level count
@@ -142,8 +224,7 @@ def denoise_and_extract_subbands(
 
     return denoised, subbands
 
-def compute_utrp(signal: np.ndarray, tau: int, m: int,
-                 size: int = UTRP_SIZE) -> Optional[np.ndarray]:
+def compute_utrp(signal: np.ndarray, tau: int, m: int, size: int = UTRP_SIZE) -> Optional[np.ndarray]:
     try:
         sig = signal[:SEGMENT_SAMPLES].astype(np.float32)
         n   = len(sig) - (m - 1) * tau
@@ -173,8 +254,7 @@ def compute_utrp(signal: np.ndarray, tau: int, m: int,
         return None
 
 
-def build_subject_groups(nsr_records: List[str],
-                          preaf_records: List[str]) -> List[Tuple]:
+def build_subject_groups(nsr_records: List[str],preaf_records: List[str]) -> List[Tuple]:
     """
     Group paired records by patient before splitting.
 
@@ -198,8 +278,7 @@ def build_subject_groups(nsr_records: List[str],
     return subjects
 
 
-def split_subjects_721(subjects: List[Tuple],
-                        seed: int = 42) -> Dict[str, List[str]]:
+def split_subjects_721(subjects: List[Tuple],seed: int = 42) -> Dict[str, List[str]]:
     rng     = random.Random(seed)
     preaf_s = [s for s in subjects if s[2] == 1]
     nsr_s   = [s for s in subjects if s[2] == 0]
@@ -246,6 +325,7 @@ def reconstruct_bandpass(signal_padded: np.ndarray, wavelet) -> np.ndarray:
 
     reconstructed = pywt.iswt(filtered, wavelet)[:SEGMENT_SAMPLES]
     return _minmax(reconstructed.astype(np.float32))
+
 class DatasetGenerator:
     KEYS = ['single'] + [f'D{l}' for l in SUBBAND_LEVELS]
 
@@ -313,9 +393,11 @@ class DatasetGenerator:
         for seg_idx, seg in enumerate(segments):
             seg_pad = _pad(seg)
 
-            subbands_multi = extract_subbands_no_denoise(
-                seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
-            )
+            # subbands_multi = extract_subbands_no_denoise(
+            #     seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
+            # )
+
+            denoised, subbands_multi= denoise_and_extract_subbands(seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS)
 
             images: Dict[str, np.ndarray] = {}
 
@@ -402,33 +484,20 @@ class DatasetGenerator:
         print(f"  Saved — NSR={n_nsr}  Pre-AF={n_preaf}")
 
     def generate(self, params_file: Path, seed: int = 42) -> None:
-        print('=' * 70)
-        print('GENERATING UTRP DATASET')
-        print(f'  Wavelet:  {self.wavelet}')
-        print(f'  Subbands: D{min(SUBBAND_LEVELS)}–D{max(SUBBAND_LEVELS)}')
-        print(f'  Output:   {self.output_dir}')
-        print('=' * 70)
-
-        # Load tau/m
         with open(params_file) as f:
             params = json.load(f)
         tau_single   = params['tau_single']
         m_single     = params['m_single']
         subband_tau  = params['subband_tau']
         subband_m    = params['subband_m']
-        print(f"\nEmbedding params: τ_single={tau_single}  m_single={m_single}")
 
-        # Build records lists
-        nsr_records   = ([f'n{i:02d}'  for i in range(1, 51)] +
-                         [f'n{i:02d}c' for i in range(1, 51)])
+        nsr_records   = ([f'n{i:02d}'  for i in range(1, 51)] +[f'n{i:02d}c' for i in range(1, 51)])
         preaf_records = [f'p{i:02d}' for i in range(1, 51)]
         nsr_set       = set(nsr_records)
 
-        # Patient-level split (pairs grouped)
         subjects = build_subject_groups(nsr_records, preaf_records)
         split    = split_subjects_721(subjects, seed=seed)
 
-        print('\nSplit summary:')
         for name in ('train', 'val', 'test'):
             recs  = split[name]
             n_nsr = sum(1 for r in recs if r in nsr_set)

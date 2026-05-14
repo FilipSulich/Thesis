@@ -880,17 +880,21 @@ def evaluate_model(
 
 if __name__ == '__main__':
 
-    model = 'multi'
+    model = 'multi_denoise'
     attention_mode = 'trained'
 
     if model == 'multi':
         model_path = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_new/multi/final_checkpoint.pt')
     elif model == 'single':
         model_path = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_new2/single/final_checkpoint.pt')
+        # model_path = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_new_d2_d8_2/single/best_checkpoint.pt')
+    elif model == 'multi_denoise':
+        model_path = Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_final_denoise/multi/final_checkpoint.pt")
     else:
         model_path = Path('/data/results_final/hybrid/best_checkpoint.pt')
 
-    data_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8')
+    # data_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_no_denoise_d2_d8')
+    data_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_full_denoise_seed_42')
     results_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new/results')
 
     metrics = evaluate_model(

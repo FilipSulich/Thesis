@@ -393,17 +393,6 @@ class SubbandRPVisualizer:
             print(f"    [ERROR] compute_rp_unthresholded: {e}")
             return np.zeros((3, size, size), dtype=np.float32)
 
-    def find_epsilon_for_target_rr(
-        self,
-        signal: np.ndarray,
-        tau: int,
-        m: int,
-        target_rr: float = 0.05,
-    ) -> float:
-        """Find epsilon that achieves target recurrence rate."""
-        return RecurrencePlotGenerator.find_epsilon_for_target_rr(
-            signal, tau, m, target_rr
-        )
 
     def visualize_subband_rps(
         self,
@@ -618,11 +607,11 @@ if __name__ == '__main__':
     from pathlib import Path
 
     # Configuration
-    DATA_DIR = Path('/data_old/paf')
-    OUTPUT_DIR = Path('/data/outputs/subband_rp_vis')
+    DATA_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf')
+    OUTPUT_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/outputs/subband_rp_vis')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    PARAMS_FILE = Path('/data_old/data_new/attention/tau_m_params.json')
+    PARAMS_FILE = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/data_new/tau_m_params.json')
 
     # Initialize visualizer
     viz = SubbandRPVisualizer(
@@ -635,7 +624,7 @@ if __name__ == '__main__':
     params = viz.load_params_from_json(PARAMS_FILE)
 
     # Example 1: Load from WFDB record
-    record_id = 'n34'  # Pre-AF record
+    record_id = 'p34'  # Pre-AF record
     print(f"Loading record: {record_id}")
     signal = viz.load_signal_from_record(DATA_DIR / record_id, resample=True)
 

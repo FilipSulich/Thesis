@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import cv2
 import matplotlib.pyplot as plt
@@ -19,6 +19,7 @@ UTRP_SIZE = 256
 PAD_SAMPLES = 8192
 
 WAVELET = 'db8'
+# SUBBAND_LEVELS = [2, 3, 4, 5]
 SUBBAND_LEVELS = [2, 3, 4, 5, 6, 7, 8]
 N_LEVELS_SWT = 10
 
@@ -68,6 +69,58 @@ class ECGSignalVisualizer:
         # Logic branch preserved for segment indexing
         start = int(segment_idx * max_start / max(1, 14))
         return signal[start: start + SEGMENT_SAMPLES]
+
+    def denoise_and_extract_subbands(
+            self,
+            signal_padded: np.ndarray,
+            wavelet: str = WAVELET,
+            n_levels: int = N_LEVELS_SWT,
+            subband_levels: List[int] = SUBBAND_LEVELS,
+    ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+        """
+        Single SWT call: denoise signal and reconstruct per-level subbands.
+
+        Steps:
+          1. SWT decomposition
+          2. Soft-threshold all detail coefficients (Donoho & Johnstone 1994)
+             threshold T = MAD/0.6745 * sqrt(2 * log(N))
+             where N = log2(fs / f_low) = log2(500/0.5) ≈ 10
+          3. Reconstruct full denoised signal from thresholded coefficients
+          4. Reconstruct each subband by zeroing all levels except target
+             (uses already-thresholded coefficients — no second denoising pass)
+
+        Returns:
+            denoised:  (SEGMENT_SAMPLES,) float32
+            subbands:  {'D2': ..., 'D3': ..., ...} each (SEGMENT_SAMPLES,) float32,
+                       min-max normalised
+        """
+        import math
+        coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
+
+        N_log = math.log2(FS_TARGET / 0.5)  # Donoho level count
+        denoised_coeffs = []
+        for cA, cD in coeffs:
+            sigma = np.median(np.abs(cD)) / 0.6745
+            T = sigma * math.sqrt(2.0 * math.log(N_log))
+            cD_d = np.sign(cD) * np.maximum(np.abs(cD) - T, 0.0)
+            denoised_coeffs.append((cA, cD_d))
+
+        denoised = pywt.iswt(denoised_coeffs, wavelet)[:SEGMENT_SAMPLES].astype(np.float32)
+
+        n_lvls = len(denoised_coeffs)
+        subbands: Dict[str, np.ndarray] = {}
+
+        for level in subband_levels:
+            target_idx = n_lvls - level
+            zeroed = [
+                ((np.zeros_like(cA), cD) if j == target_idx
+                 else (np.zeros_like(cA), np.zeros_like(cD)))
+                for j, (cA, cD) in enumerate(denoised_coeffs)
+            ]
+            sub = pywt.iswt(zeroed, wavelet)[:SEGMENT_SAMPLES].astype(np.float32)
+            subbands[f'D{level}'] = _minmax(sub)
+
+        return denoised, subbands
 
     def extract_subbands(self, signal_padded: np.ndarray) -> Dict[str, np.ndarray]:
         """Extract detail subbands using Stationary Wavelet Transform (SWT)."""
@@ -182,7 +235,7 @@ class ECGSignalVisualizer:
         plt.close()
 
     def plot_subband_utrps(self, utrps, record_id, save_path=None):
-        fig, axes = plt.subplots(2, 4, figsize=(14, 7))
+        fig, axes = plt.subplots(2, 4, figsize=(12, 7))
         axes = axes.flatten()
         for idx, level in enumerate(SUBBAND_LEVELS):
             ax = axes[idx]
@@ -198,6 +251,85 @@ class ECGSignalVisualizer:
         if save_path: plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.show();
         plt.close()
+
+    def plot_comparison_utrps(self, record_paf: str, record_nsr: str, segment_idx: int = 0, tau: int = 3, m: int = 3,
+                              save_path=None):
+        """
+        Creates a 2x7 plot comparing UTRPs of a pre-AF record and an NSR record.
+        Top row: pre-AF UTRPs (D2-D8)
+        Bottom row: NSR UTRPs (D2-D8)
+        """
+        print(f"\nProcessing comparison: {record_paf} (pre-AF) vs {record_nsr} (NSR)")
+
+        # --- Process pre-AF ---
+        signal_paf_full = self.load_signal(record_paf)
+        if signal_paf_full is None: return
+        segment_paf = self.extract_segment(signal_paf_full, segment_idx)
+        subbands_paf = self.extract_subbands(_pad(segment_paf))
+        utrps_paf = {name: self.compute_utrp(sig, tau, m) for name, sig in subbands_paf.items()}
+
+        # --- Process NSR ---
+        signal_nsr_full = self.load_signal(record_nsr)
+        if signal_nsr_full is None: return
+        segment_nsr = self.extract_segment(signal_nsr_full, segment_idx)
+        subbands_nsr = self.extract_subbands(_pad(segment_nsr))
+        utrps_nsr = {name: self.compute_utrp(sig, tau, m) for name, sig in subbands_nsr.items()}
+
+        # --- Plotting ---
+        # 2 rows, 7 columns. Adjust figsize if you want the images larger or smaller.
+        fig, axes = plt.subplots(2, len(SUBBAND_LEVELS), figsize=(24, 7.5), sharex=True)
+
+        for col_idx, level in enumerate(SUBBAND_LEVELS):
+            subband_key = f'D{level}'
+
+            # Top row: pre-AF
+            ax_top = axes[0, col_idx]
+            if subband_key in utrps_paf and utrps_paf[subband_key] is not None:
+                ax_top.imshow(utrps_paf[subband_key].transpose(1, 2, 0))
+            ax_top.set_title(f'Pre-AF ({record_paf})\n{subband_key}', fontweight='bold')
+            ax_top.set_xlabel('Time Index (i)', fontsize=9)
+            ax_top.set_ylabel('Time Index (j)', fontsize=9)
+            # ax_top.set_xticks([])  # Hiding ticks to make it cleaner, but kept axis labels
+            # ax_top.set_yticks([])
+
+            # Bottom row: NSR
+            ax_bot = axes[1, col_idx]
+            if subband_key in utrps_nsr and utrps_nsr[subband_key] is not None:
+                ax_bot.imshow(utrps_nsr[subband_key].transpose(1, 2, 0))
+            ax_bot.set_title(f'NSR ({record_nsr})\n{subband_key}', fontweight='bold')
+            ax_bot.set_xlabel('Time Index (i)', fontsize=9)
+            ax_bot.set_ylabel('Time Index (j)', fontsize=9)
+            # ax_bot.set_xticks([])
+            # ax_bot.set_yticks([])
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=200, bbox_inches='tight')
+        plt.show()
+        plt.close()
+
+    def visualize_complete_denoise(self, record_id, segment_idx=0, tau=3, m=3, save_dir=None):
+        print(f"\nProcessing: {record_id} (segment {segment_idx})")
+        signal_full = self.load_signal(record_id)
+        if signal_full is None: return
+
+        segment = self.extract_segment(signal_full, segment_idx)
+        # subbands = self.extract_subbands(_pad(segment))
+        _, subbands = self.denoise_and_extract_subbands(_pad(segment))
+
+        utrp_original = self.compute_utrp(segment, tau, m)
+        utrps = {name: self.compute_utrp(sig, tau, m) for name, sig in subbands.items()}
+
+        paths = [None] * 3
+        if save_dir:
+            sd = Path(save_dir)
+            sd.mkdir(parents=True, exist_ok=True)
+            paths = [sd / f'{record_id}_seg{segment_idx}_{i}.png' for i in ['orig', 'sub', 'utrp']]
+
+        self.plot_original_signal_and_utrp(segment, utrp_original, record_id, paths[0])
+        self.plot_original_signal(segment, utrp_original, record_id, paths[0])
+        self.plot_subband_signals(subbands, record_id, paths[1])
+        self.plot_subband_utrps(utrps, record_id, paths[2])
 
     def visualize_complete(self, record_id, segment_idx=0, tau=3, m=3, save_dir=None):
         print(f"\nProcessing: {record_id} (segment {segment_idx})")
@@ -226,5 +358,16 @@ if __name__ == '__main__':
     # Usage preserved for n31 and p01
     data=Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf")
     vis = ECGSignalVisualizer(data_dir=data)
-    for rid in ['n47', 'p25']:
-        vis.visualize_complete(record_id=rid, save_dir='/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new')
+    # for rid in ['n06', 'p03']:
+    #     vis.visualize_complete(record_id=rid, save_dir='/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new')
+        # vis.visualize_complete_denoise(record_id=rid, save_dir='/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new_denoise')
+    save_dir = Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new")
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate the 2x7 comparison plot
+    vis.plot_comparison_utrps(
+        record_paf='p03',
+        record_nsr='n06',
+        segment_idx=0,
+        save_path=save_dir / 'utrp_comparison_p03_vs_n06.png'
+    )

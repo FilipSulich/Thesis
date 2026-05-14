@@ -120,7 +120,7 @@ def load_fold_probs(save_dir: Path,
     Load per-fold predicted probabilities and labels from saved JSON.
 
     Expects save_dir/kfold_results.json produced by run_kfold_cv.
-    key: 'trained_attention', 'uniform_attention', or 'results' (single-scale)
+    key: 'trained_attention', 'uniform_attention', or 'results_harm' (single-scale)
 
     Returns:
         fold_probs_list:  list of (N,) arrays
@@ -136,7 +136,7 @@ def load_fold_probs(save_dir: Path,
     # Resolve key
     if key not in results:
         available = list(results.keys())
-        raise KeyError(f"Key '{key}' not in results. Available: {available}")
+        raise KeyError(f"Key '{key}' not in results_harm. Available: {available}")
 
     per_fold = results[key]['per_fold']
 
@@ -487,9 +487,9 @@ if __name__ == '__main__':
               else torch.device('cpu'))
 
     PNG_DIR        = Path('/Users/filipsulich/Developer/uni/Thesis/dataset/images2')
-    MULTI_SAVE_DIR = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/results_kfold2/multi')
-    SINGLE_SAVE_DIR= Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/results_kfold2/single')
-    OUTPUT_DIR     = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/results_kfold2/analysis')
+    MULTI_SAVE_DIR = Path('/results_final/results_kfold2/multi')
+    SINGLE_SAVE_DIR= Path('/results_final/results_kfold2/single')
+    OUTPUT_DIR     = Path('/results_final/results_kfold2/analysis')
 
     dataset_multi  = CombinedPNGDataset(PNG_DIR, mode='multi',  cache=True)
     dataset_single = CombinedPNGDataset(PNG_DIR, mode='single', cache=True)

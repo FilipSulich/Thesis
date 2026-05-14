@@ -1,0 +1,67 @@
+{
+  "A4": {
+    "freq_hz": 2,
+    "tau": 6,
+    "m": 2,
+    "epsilon": 0.10000000149011612,
+    "DET": 1.0,
+    "LAM": 0.99962174702441,
+    "TT": 4.8945548833189285,
+    "ENTR": 1.30951302186699,
+    "L_mean_diagonal": 24.74525916561315,
+    "L_longest_diagonal": 1017.0,
+    "L_longest_vertical": 9.0
+  },
+  "D4": {
+    "freq_hz": 6,
+    "tau": 3,
+    "m": 3,
+    "epsilon": 0.10000000149011612,
+    "DET": 1.0,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 3.850147601710058,
+    "L_mean_diagonal": 506.0,
+    "L_longest_diagonal": 997.0,
+    "L_longest_vertical": 1.0
+  },
+  "D3": {
+    "freq_hz": 12,
+    "tau": 2,
+    "m": 4,
+    "epsilon": 0.10000000149011612,
+    "DET": 1.0,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 3.4339872044851463,
+    "L_mean_diagonal": 506.0,
+    "L_longest_diagonal": 986.0,
+    "L_longest_vertical": 1.0
+  },
+  "D2": {
+    "freq_hz": 24,
+    "tau": 5,
+    "m": 4,
+    "epsilon": 0.10000000149011612,
+    "DET": 0.9999680623423078,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 4.127134385045091,
+    "L_mean_diagonal": 505.0,
+    "L_longest_diagonal": 993.0,
+    "L_longest_vertical": 1.0
+  },
+  "D1": {
+    "freq_hz": 48,
+    "tau": 3,
+    "m": 4,
+    "epsilon": 0.10000000149011612,
+    "DET": 1.0,
+    "LAM": 0.0,
+    "TT": 0.0,
+    "ENTR": 4.836281906951481,
+    "L_mean_diagonal": 507.0,
+    "L_longest_diagonal": 1007.0,
+    "L_longest_vertical": 1.0
+  }
+}

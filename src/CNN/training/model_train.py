@@ -79,7 +79,6 @@ def eval_epoch(model, loader, criterion, device, model_arch: str) -> tuple:
     return (total_loss / n, correct / n, auc,
             np.array(all_probs), np.array(all_labels))
 
-
 def threshold_analysis(va_probs, va_true, te_probs, te_true) -> dict:
     """Find F1-optimal and Youden threshold on val, apply to test."""
     threshs = np.arange(0.05, 0.95, 0.01)
@@ -501,7 +500,7 @@ def train_model_cv(
         print(f"  Best Val AUC: {best_auc:.4f}")
         print(f"  Test AUC: {te_auc:.4f}")
 
-        # Save fold results
+        # Save fold results_harm
         fold_result = {
             'fold': fold_idx + 1,
             'val_auc': float(best_auc),
@@ -551,7 +550,7 @@ def train_model_cv(
     print(f"\nPer-fold validation AUCs: {[f'{auc:.4f}' for auc in cv_results['cv_val_aucs']]}")
     print(f"Per-fold test AUCs:       {[f'{auc:.4f}' for auc in cv_results['cv_test_aucs']]}")
 
-    # Save aggregate results
+    # Save aggregate results_harm
     with open(results_dir / 'cv_results.json', 'w') as f:
         json.dump(cv_results, f, indent=2)
 
@@ -562,11 +561,11 @@ def train_model_cv(
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    DATA_DIR    = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8')
-    RESULTS_ROOT = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_final_cv')
+    DATA_DIR    = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_final/utrp_dataset_db8_full_denoise_seed_42')
+    RESULTS_ROOT = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/data/results_final_denoise')
 
     # ── Configuration ──────────────────────────────────────────────────────────
-    USE_CROSS_VALIDATION = True  # Set to True for 5-fold CV, False for single train
+    USE_CROSS_VALIDATION = False  # Set to True for 5-fold CV, False for single train
     N_FOLDS = 4
 
     CONFIGS = [
