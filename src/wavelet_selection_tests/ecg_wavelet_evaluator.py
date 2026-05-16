@@ -391,94 +391,100 @@ class ECGWaveletEvaluator:
             json.dump(self.results, f, indent=2)
         print(f"\n✓ Results saved → {path}")
 
-    def plot_results(self) -> None:
+    def plot_boxplot(self) -> None:
         """
-        Two plots:
-        1. Bar chart: median AUC per wavelet with min AUC dot
-        2. Heatmap: AUC per wavelet × subband
+        Boxplot comparing AUC distributions across top wavelets.
+        Uses consistent style matching create_auc_boxplot from compare_roc_curves.
         """
+        # Get top 5 wavelets by median AUC
         ranked = sorted(
             self.results.items(),
             key=lambda x: x[1]['median_auc'], reverse=True
         )
-        wavelets_ordered = [w for w, _ in ranked]
+        top_wavelets = [w for w, _ in ranked[:5]]
 
-        # ── Bar chart ──────────────────────────────────────────────────
-        medians = [self.results[w]['median_auc'] for w in wavelets_ordered]
-        mins    = [self.results[w]['min_auc']    for w in wavelets_ordered]
-        colours = [
-            '#1f77b4' if w.startswith('db')
-            else '#d62728' if w.startswith('sym')
-            else '#2ca02c'
-            for w in wavelets_ordered
-        ]
+        # Collect AUC values for each wavelet across all subbands
+        data = []
+        labels = []
+        colors_list = []
 
-        fig, ax = plt.subplots(figsize=(12, 5))
-        x = np.arange(len(wavelets_ordered))
-        ax.bar(x, medians, color=colours, alpha=0.85,
-               edgecolor='black', lw=0.5)
-        ax.scatter(x, mins, color='black', s=50, zorder=5,
-                   label='Min AUC (worst subband)')
-        ax.axhline(0.5, color='gray', ls='--', lw=1, alpha=0.6,
-                   label='Chance level')
-        ax.set_xticks(x)
-        ax.set_xticklabels(wavelets_ordered, rotation=45,
-                           ha='right', fontsize=10)
-        ax.set_ylabel('Median AUC across D2–D8', fontsize=12)
-        ax.set_title(
-            'Wavelet selection: UTRP feature discriminability\n'
-            'Logistic regression probe, 5-fold CV  |  '
-            'Pre-AF vs NSR',
-            fontsize=12
+        for wavelet in top_wavelets:
+            auc_values = []
+            for level in SUBBAND_LEVELS:
+                name = f'D{level}'
+                subband_data = self.results[wavelet]['per_subband'].get(name)
+                if subband_data is not None and 'values' in subband_data:
+                    auc_values.extend(subband_data['values'])
+
+            if auc_values:
+                data.append(auc_values)
+                labels.append(wavelet)
+
+                # Assign colors by family
+                if wavelet.startswith('db'):
+                    colors_list.append('#1f77b4')
+                elif wavelet.startswith('sym'):
+                    colors_list.append('#d62728')
+                else:
+                    colors_list.append('#2ca02c')
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        box = ax.boxplot(
+            data,
+            patch_artist=True,
+            widths=0.55,
+            showfliers=False
         )
-        ax.legend(handles=[
-            Patch(facecolor='#1f77b4', label='Daubechies'),
-            Patch(facecolor='#d62728', label='Symlets'),
-            Patch(facecolor='#2ca02c', label='Coiflets'),
-            plt.Line2D([0], [0], color='black', marker='o',
-                       ls='', label='Min AUC'),
-        ], fontsize=9)
-        ax.grid(True, alpha=0.3, axis='y')
-        ax.set_ylim(0.4, 1.0)
-        plt.tight_layout()
-        plt.savefig(self.results_dir / 'wavelet_barchart.png', dpi=150)
-        plt.close()
-        print(f"✓ Bar chart saved")
 
-        # ── Heatmap ────────────────────────────────────────────────────
-        auc_matrix = np.array([
-            [
-                self.results[w]['per_subband'].get(
-                    f'D{l}', {'mean': 0.0}
-                )['mean']
-                if self.results[w]['per_subband'].get(f'D{l}') else 0.0
-                for l in SUBBAND_LEVELS
-            ]
-            for w in wavelets_ordered
-        ])
+        # Box colors
+        for patch, color in zip(box['boxes'], colors_list):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.35)
 
-        fig, ax = plt.subplots(figsize=(9, 7))
-        im = ax.imshow(auc_matrix, aspect='auto',
-                       cmap='YlOrRd', vmin=0.4, vmax=0.8)
-        ax.set_xticks(range(len(SUBBAND_LEVELS)))
-        ax.set_xticklabels([
-            f'D{l}\n{FS_TARGET/2**(l+1):.0f}–{FS_TARGET/2**l:.0f}Hz'
-            for l in SUBBAND_LEVELS
-        ], fontsize=9)
-        ax.set_yticks(range(len(wavelets_ordered)))
-        ax.set_yticklabels(wavelets_ordered, fontsize=10)
-        ax.set_xlabel('Subband', fontsize=12)
-        ax.set_ylabel('Wavelet (ranked by median AUC)', fontsize=12)
-        ax.set_title(
-            'AUC per wavelet × subband\n'
-            '(UTRP texture features, logistic regression probe)',
-            fontsize=12
+        # Formatting
+        ax.set_xticks(range(1, len(labels) + 1))
+        ax.set_xticklabels(
+            labels,
+            fontsize=11
         )
-        plt.colorbar(im, ax=ax, label='AUC')
+
+        ax.set_ylabel(
+            'AUC',
+            fontsize=12,
+            fontweight='bold'
+        )
+
+        ax.set_title(
+            'Top 5 Wavelets: AUC Distribution Across Subbands\n5-fold CV',
+            fontsize=13,
+            fontweight='bold'
+        )
+
+        ax.grid(
+            alpha=0.3,
+            linestyle='--'
+        )
+
         plt.tight_layout()
-        plt.savefig(self.results_dir / 'wavelet_heatmap.png', dpi=150)
+
+        # Save
+        plt.savefig(
+            self.results_dir / 'wavelet_auc_boxplot.png',
+            dpi=300,
+            bbox_inches='tight'
+        )
+
+        plt.savefig(
+            self.results_dir / 'wavelet_auc_boxplot.pdf',
+            bbox_inches='tight'
+        )
+
         plt.close()
-        print(f"✓ Heatmap saved")
+
+        print(f"✓ AUC boxplot saved")
+
 
 
 # ── Entry point ────────────────────────────────────────────────────────────
@@ -569,7 +575,7 @@ if __name__ == '__main__':
 
     df = evaluator.run_all()
     evaluator.save_results()
-    evaluator.plot_results()
+    evaluator.plot_boxplot()
 
     best = df.iloc[0]
     print(f"\n{'='*65}")

@@ -108,7 +108,6 @@ class ExperimentRunner:
 
         # Generate plots
         print("\nGenerating visualizations...")
-        self.visualizer.plot_violin_comparisons(agg_df, self.METRICS)
         self.visualizer.plot_boxplot_comparisons(agg_df, self.METRICS)
 
         print(f"\n{'='*80}")
@@ -231,10 +230,10 @@ def main():
         'D1': 61    # 32-64 Hz
     }
 
-    output_dir = '/Users/filipsulich/Developer/uni/Thesis/Thesis/src/decomposition_strategy_selection/results_test_harm2'
+    output_dir = '/Users/filipsulich/Developer/uni/Thesis/Thesis/src/decomposition_strategy_selection/results_test_non_harm2'
 
     runner = ExperimentRunner(
-        subband_freqs=SUBBAND_FREQS_HARM,
+        subband_freqs=SUBBAND_FREQS_NON_HARM,
         output_dir=output_dir
     )
 

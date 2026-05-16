@@ -25,14 +25,13 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from tqdm import tqdm
 from scipy.stats import kruskal
 from scikit_posthocs import posthoc_dunn
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from pipelines.pipeline_wavelets import Pipeline
+from src.pipelines.pipeline_wavelets import Pipeline
 
 
 class SpectralLeakageTestV2:
@@ -312,15 +311,10 @@ class SpectralLeakageTestV2:
 
     def plot_der_comparison(self, df: pd.DataFrame) -> None:
         """
-        Refined publication-level DER comparison plot.
+        DER comparison plot with consistent boxplot style.
+        Matches create_auc_boxplot style from compare_roc_curves.
         """
-        # 1. Style Setup
-        sns.set_theme(style="whitegrid")
-        sns.set_context("paper", font_scale=1.5)
-
-        fig, ax = plt.subplots(figsize=(14, 7))
-
-        # 2. Logical Sorting: Group by family, then order
+        # Logical Sorting: Group by family, then order
         def wavelet_key(w):
             family = "".join([c for c in w if not c.isdigit()])
             order = int("".join([c for c in w if c.isdigit()]))
@@ -329,54 +323,116 @@ class SpectralLeakageTestV2:
 
         sorted_wavelets = sorted(df['wavelet'].unique(), key=wavelet_key)
 
-        # 3. Professional Color Map (Viridis-style contrast)
-        # Deep Blue for Harmonic, Vibrant Green/Teal for Non-Harmonic
-        palette = {"Harmonic": "#2c3e50", "Non-harmonic": "#16a085"}
+        # Color palette - consistent with compare_roc_curves
+        colors = {
+            'Harmonic': '#1f77b4',
+            'Non-harmonic': '#d62728'
+        }
 
-        sns.boxplot(
-            data=df,
-            x='wavelet',
-            y='DER',
-            hue='condition',
-            order=sorted_wavelets,
-            palette=palette,
-            width=0.7,
-            linewidth=1.5,
-            fliersize=4,
-            ax=ax
+        # Prepare data for boxplot
+        # For each wavelet, we have two boxes (Harmonic and Non-harmonic)
+        positions = []
+        data = []
+        box_colors = []
+        labels = []
+
+        for i, wavelet in enumerate(sorted_wavelets):
+            # Position calculation: each wavelet gets two boxes side by side
+            base_pos = i * 3  # spacing between wavelets
+
+            for j, condition in enumerate(['Harmonic', 'Non-harmonic']):
+                condition_data = df[
+                    (df['wavelet'] == wavelet) &
+                    (df['condition'] == condition)
+                ]['DER'].values
+
+                if len(condition_data) > 0:
+                    positions.append(base_pos + j * 0.6)
+                    data.append(condition_data)
+                    box_colors.append(colors[condition])
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(16, 7))
+
+        box = ax.boxplot(
+            data,
+            positions=positions,
+            patch_artist=True,
+            widths=0.4,
+            showfliers=False
         )
 
-        # 4. Axis and Limits (Ensuring no cut-offs)
-        # ax.set_ylim(0, 1.05)  # Shows the full scale from 0 to 1
+        # Apply box colors
+        for patch, color in zip(box['boxes'], box_colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.35)
 
-        ax.set_xlabel('Wavelet Function', fontweight='bold')
-        ax.set_ylabel('Energy Ratio', fontweight='bold')
-        ax.set_title('Energy Leakage Analysis \n Harmonic vs. Non-harmonic Frequency Placement Conditions \n (Higher is better)', pad=20,
-                     fontweight='bold')
+        # X-axis: wavelet labels centered between the two boxes
+        x_ticks = []
+        for i in range(len(sorted_wavelets)):
+            x_ticks.append(i * 3 + 0.3)
 
-        # 5. Final Formatting
-        plt.xticks(rotation=45)
+        ax.set_xticks(x_ticks)
+        ax.set_xticklabels(
+            sorted_wavelets,
+            rotation=45,
+            ha='right',
+            fontsize=11
+        )
 
-        # --- LEGEND REDUCTION HERE ---
-        # Overriding the global font_scale=1.5 with absolute font sizes (11 and 12)
-        # handlelength reduces the width of the color boxes inside the legend
+        # Formatting
+        ax.set_xlabel(
+            'Wavelet Function',
+            fontsize=12,
+            fontweight='bold'
+        )
+
+        ax.set_ylabel(
+            'Energy Ratio (ER)',
+            fontsize=12,
+            fontweight='bold'
+        )
+
+        ax.set_title(
+            'Energy Leakage Analysis\n'
+            '(Higher is better)',
+            fontsize=13,
+            fontweight='bold',
+            pad=20
+        )
+
+        ax.grid(
+            alpha=0.3,
+            linestyle='--'
+        )
+
+        # Legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor=colors['Harmonic'], alpha=0.35,
+                  edgecolor='black', label='Harmonic'),
+            Patch(facecolor=colors['Non-harmonic'], alpha=0.35,
+                  edgecolor='black', label='Non-harmonic')
+        ]
+
         ax.legend(
-            title='Condition',
-            frameon=True,
+            handles=legend_elements,
             loc='lower right',
-            fontsize=11,  # Shrinks the labels
-            title_fontsize=12,  # Shrinks the title
-            handlelength=1.2,  # Makes the color box shorter
-            borderpad=0.5  # Reduces padding inside the legend box
+            fontsize=11
         )
-
-        # Despine for a cleaner "Modern Scientific" look
-        sns.despine()
 
         plt.tight_layout()
-        plot_path = self.output_dir / 'der_clean_publication.png'
+
+        # Save
+        plot_path = self.output_dir / 'der_boxplot.png'
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.show()
+
+        plot_path_pdf = self.output_dir / 'der_boxplot.pdf'
+        plt.savefig(plot_path_pdf, bbox_inches='tight')
+
+        plt.close()
+
+        print(f"✓ DER boxplot saved to {plot_path}")
 
     def print_summary(self, df: pd.DataFrame) -> None:
         """
@@ -425,10 +481,34 @@ class SpectralLeakageTestV2:
 
             self._run_statistical_tests(df_cond, condition)
 
+    @staticmethod
+    def _compute_cohens_d(x, y):
+        """
+        Compute Cohen's d effect size.
+
+        Args:
+            x, y: Arrays of values
+
+        Returns:
+            Cohen's d
+        """
+        nx = len(x)
+        ny = len(y)
+
+        # Pooled standard deviation
+        pooled_std = np.sqrt(
+            ((nx - 1) * np.var(x, ddof=1) + (ny - 1) * np.var(y, ddof=1)) / (nx + ny - 2)
+        )
+
+        # Cohen's d
+        d = (np.mean(x) - np.mean(y)) / pooled_std if pooled_std > 0 else 0.0
+
+        return float(d)
+
     def _run_statistical_tests(self, df_cond: pd.DataFrame, condition: str) -> None:
         """
         Perform Kruskal-Wallis test across wavelets with Dunn post-hoc.
-        
+
         Args:
             df_cond: DataFrame filtered to one condition
             condition: Condition name (for output filename)
@@ -436,29 +516,29 @@ class SpectralLeakageTestV2:
         # Prepare groups for Kruskal-Wallis
         wavelets = sorted(df_cond['wavelet'].unique())
         groups = [df_cond[df_cond['wavelet'] == w]['DER'].values for w in wavelets]
-        
+
         # Kruskal-Wallis test
         h_stat, p_value_kw = kruskal(*groups)
-        
+
         print(f"Kruskal-Wallis Test:")
         print(f"  H-statistic: {h_stat:.6f}")
         print(f"  p-value: {p_value_kw:.6e}")
         print(f"  Significance: {'***' if p_value_kw < 0.001 else '**' if p_value_kw < 0.01 else '*' if p_value_kw < 0.05 else 'ns'}")
-        
+
         # Dunn post-hoc test with Bonferroni correction
         print(f"\nDunn Post-Hoc Test (Bonferroni correction):")
         print("-" * 90)
         print(f"{'Comparison':<25} {'p-value':<12} {'Significance':<15} {'Mean Diff':<12}")
         print("-" * 90)
-        
+
         try:
             dunn_results = posthoc_dunn(df_cond, val_col='DER', group_col='wavelet', p_adjust='fdr_bh')
-            
+
             # Save Dunn results
             dunn_path = self.output_dir / f'dunn_posthoc_{condition}.csv'
             dunn_results.to_csv(dunn_path)
             print(f"✓ Full Dunn post-hoc results saved to {dunn_path}\n")
-            
+
             # Print ALL comparisons (not just significant ones)
             significant_count = 0
             for i, wav1 in enumerate(wavelets):
@@ -468,7 +548,7 @@ class SpectralLeakageTestV2:
                         mean1 = df_cond[df_cond['wavelet'] == wav1]['DER'].mean()
                         mean2 = df_cond[df_cond['wavelet'] == wav2]['DER'].mean()
                         mean_diff = abs(mean1 - mean2)
-                        
+
                         if p_val < 0.001:
                             sig = '***'
                             significant_count += 1
@@ -480,20 +560,105 @@ class SpectralLeakageTestV2:
                             significant_count += 1
                         else:
                             sig = 'ns'
-                        
+
                         print(f"{wav1:>5} vs {wav2:<5} {p_val:<12.6f} {sig:<15} {mean_diff:<12.6f}")
-            
+
             print("-" * 90)
             print(f"Significant comparisons (p < 0.05): {significant_count} / {len(wavelets) * (len(wavelets)-1) // 2}")
-        
+
         except Exception as e:
             print(f"  Warning: Dunn test failed: {e}")
+
+    def create_db8_comparison_table(self, df: pd.DataFrame) -> None:
+        """
+        Create CSV comparing all wavelets against db8.
+
+        Columns: wavelet, non-harmonic p-value, harmonic p-value,
+                 cohen_d_non_harmonic, cohen_d_harmonic
+
+        Rows: All 16 wavelets (excluding db8)
+        """
+        print(f"\n{'='*80}")
+        print("CREATING DB8 COMPARISON TABLE")
+        print(f"{'='*80}\n")
+
+        # Get all wavelets except db8
+        all_wavelets = sorted([w for w in df['wavelet'].unique() if w != 'db8'])
+
+        # Get db8 data for both conditions
+        db8_harm = df[(df['wavelet'] == 'db8') & (df['condition'] == 'Harmonic')]['DER'].values
+        db8_nonharm = df[(df['wavelet'] == 'db8') & (df['condition'] == 'Non-harmonic')]['DER'].values
+
+        # Load Dunn test results for p-values
+        dunn_harm_path = self.output_dir / 'dunn_posthoc_Harmonic.csv'
+        dunn_nonharm_path = self.output_dir / 'dunn_posthoc_Non-harmonic.csv'
+
+        if not dunn_harm_path.exists() or not dunn_nonharm_path.exists():
+            print("Error: Dunn test results not found. Run print_summary() first.")
+            return
+
+        dunn_harm = pd.read_csv(dunn_harm_path, index_col=0)
+        dunn_nonharm = pd.read_csv(dunn_nonharm_path, index_col=0)
+
+        # Build comparison table
+        comparison_data = []
+
+        for wavelet in all_wavelets:
+            # Get p-values from Dunn test
+            try:
+                p_harm = dunn_harm.loc['db8', wavelet]
+            except:
+                p_harm = np.nan
+
+            try:
+                p_nonharm = dunn_nonharm.loc['db8', wavelet]
+            except:
+                p_nonharm = np.nan
+
+            # Get wavelet data for both conditions
+            wav_harm = df[(df['wavelet'] == wavelet) & (df['condition'] == 'Harmonic')]['DER'].values
+            wav_nonharm = df[(df['wavelet'] == wavelet) & (df['condition'] == 'Non-harmonic')]['DER'].values
+
+            # Calculate Cohen's d
+            cohens_d_harm = self._compute_cohens_d(db8_harm, wav_harm)
+            cohens_d_nonharm = self._compute_cohens_d(db8_nonharm, wav_nonharm)
+
+            comparison_data.append({
+                'wavelet': wavelet,
+                'p_value_non_harmonic': p_nonharm,
+                'p_value_harmonic': p_harm,
+                'cohens_d_non_harmonic': cohens_d_nonharm,
+                'cohens_d_harmonic': cohens_d_harm
+            })
+
+        # Create DataFrame
+        comparison_df = pd.DataFrame(comparison_data)
+
+        # Save to CSV
+        output_path = self.output_dir / 'db8_comparison_table.csv'
+        comparison_df.to_csv(output_path, index=False)
+
+        print(f"✓ DB8 comparison table saved to {output_path}\n")
+
+        # Print table
+        print("DB8 COMPARISON TABLE")
+        print("="*100)
+        print(f"{'Wavelet':<10} {'p-value (Non-harm)':<20} {'p-value (Harm)':<20} {'Cohen d (Non-harm)':<20} {'Cohen d (Harm)':<20}")
+        print("-"*100)
+
+        for _, row in comparison_df.iterrows():
+            print(f"{row['wavelet']:<10} {row['p_value_non_harmonic']:<20.6e} {row['p_value_harmonic']:<20.6e} "
+                  f"{row['cohens_d_non_harmonic']:<20.4f} {row['cohens_d_harmonic']:<20.4f}")
+
+        print("="*100)
+        print(f"\nNote: Positive Cohen's d means db8 has higher DER (better performance)")
+        print(f"      Negative Cohen's d means the other wavelet has higher DER\n")
 
 
 if __name__ == '__main__':
     import json
 
-    output_dir = Path('/src/wavelet_selection_tests/leakage_test_results_v2')
+    output_dir = Path('/Users/filipsulich/Developer/uni/Thesis/Thesis/src/wavelet_selection_tests/leakage_test_results_v2')
 
     tester = SpectralLeakageTestV2(
         fs=128,
@@ -511,4 +676,7 @@ if __name__ == '__main__':
 
     # Print summary and perform statistical tests
     tester.print_summary(df)
+
+    # Create db8 comparison table
+    tester.create_db8_comparison_table(df)
 
