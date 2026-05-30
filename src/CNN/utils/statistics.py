@@ -146,6 +146,9 @@ def compute_summary_stats(fold_results, metric='auc'):
     """
     values = [fold[metric] for fold in fold_results]
 
+    if len(values) == 0:
+        raise ValueError(f"No values found for metric '{metric}'. Check if fold results are empty.")
+
     return {
         'mean': float(np.mean(values)),
         'std': float(np.std(values)),
@@ -168,6 +171,11 @@ def compare_models(data_dict, metrics=['auc', 'auprc'], alpha=0.05):
     returns:
         dict with summary stats, friedman results, and pairwise comparisons
     """
+    # validate that all models have fold results
+    for model_name, fold_results in data_dict.items():
+        if not fold_results:
+            raise ValueError(f"Model '{model_name}' has no fold results. Check if checkpoints exist and are being loaded correctly.")
+
     results = {
         'summary': {},
         'friedman': {},

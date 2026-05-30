@@ -15,7 +15,7 @@ DATA_ROOT = Path(__file__).parent.parent.parent.parent
 H5_DIR = DATA_ROOT / 'data' / 'processed_data' / 'urp_no_denoise'
 H5_DIR_DENOISED= DATA_ROOT / 'data' / 'processed_data' / 'urp_denoise'
 
-RESULTS_BASE = Path("/results_final/models_final_weights")
+RESULTS_BASE = DATA_ROOT / 'results_final' / 'models_final_weights'
 
 RESULTS_SINGLE = RESULTS_BASE / 'single'
 
@@ -39,9 +39,9 @@ SUBBAND_CONFIGS = {
 def main():
 
     print("Loading datasets: ")
-    dataset_single = CombinedH5Dataset(H5_DIR, mode='single', cache=True)
-    dataset_multi = CombinedH5Dataset(H5_DIR, mode='multi', subband_keys=SUBBAND_CONFIGS['multi'], cache=True)
-    dataset_multi_denoised = CombinedH5Dataset(H5_DIR_DENOISED, mode='multi', subband_keys=SUBBAND_CONFIGS['multi'], cache=True)
+    dataset_single = CombinedH5Dataset(H5_DIR, mode='single')
+    dataset_multi = CombinedH5Dataset(H5_DIR, mode='multi', subband_keys=SUBBAND_CONFIGS['multi'])
+    dataset_multi_denoised = CombinedH5Dataset(H5_DIR_DENOISED, mode='multi', subband_keys=SUBBAND_CONFIGS['multi'])
     print("Datasets loaded")
 
     results = {}
@@ -55,7 +55,6 @@ def main():
         dataset=dataset_single,
         device=DEVICE,
         batch_size=BATCH_SIZE,
-        collect_attention=False
     )
 
     results['Multi-scale'] = evaluate_model_folds(
@@ -65,7 +64,6 @@ def main():
         dataset=dataset_multi,
         device=DEVICE,
         batch_size=BATCH_SIZE,
-        collect_attention=True
     )
 
     results['Multi-scale denoised'] = evaluate_model_folds(
@@ -75,7 +73,6 @@ def main():
         dataset=dataset_multi_denoised,
         device=DEVICE,
         batch_size=BATCH_SIZE,
-        collect_attention=True
     )
 
     print("Statistical analysis:")
@@ -86,8 +83,8 @@ def main():
         alpha=0.05
     )
 
-    print(f"\n{'metric':<15s} {'Full-band':>15s} {'Multi-scale':>15s} {'Multi-scale denoised':>15s}''")
-    print("-" * 60)
+    print(f"\n{'metric':<15s} {'Full-band':>15s} {'Multi-scale':>15s} {'Multi-scale denoised':>15s}")
+    print("-" * 80)
     for metric in ['auc', 'auprc', 'sensitivity', 'specificity']:
         single_stats = stats['summary']['Full-band'][metric]
         multi_stats = stats['summary']['Multi-scale'][metric]
