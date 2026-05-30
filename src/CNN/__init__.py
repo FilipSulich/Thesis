@@ -1,44 +1,88 @@
-# """
-# UTRP-based Pre-AF Classification using CNNs.
-#
-# This package provides a complete pipeline for:
-#   1. Generating UTRP datasets from PAF ECG data_old
-#   2. Training CNN classifiers (custom or ResNet-18)
-#   3. Patient-stratified cross-validation
-#   4. Comprehensive evaluation and visualization
-#
-# Quick Start:
-#     # Generate dataset
-#     python src/CNN/dataset_generator.py
-#
-#     # Train single-scale ResNet-18
-#     python src/CNN/run_classification.py --model single --arch resnet
-#
-#     # Inspect dataset
-#     python src/CNN/inspect_dataset.py
-#
-# Modules:
-#     - base_cnn: Abstract base class with training/evaluation methods
-#     - models: CNN architectures (SingleScaleCNN, MultiScaleCNN, ResNet18Transfer)
-#     - dataset: PyTorch Dataset and data_old loading utilities
-#     - cross_validation: Patient-stratified K-fold splitter
-#     - training: Cross-validation runner with hyperparameter tuning
-#     - dataset_generator: UTRP dataset generation from PAF data_old
-#     - run_classification: Main entry point for experiments
-#     - inspect_dataset: Dataset inspection and visualization
-# """
-#
-# from src.CNN.models import SingleScaleCNN, MultiScaleCNN, ResNet18Transfer
-# from src.CNN.dataset import UTRPDataset, compute_class_weights, create_dataloaders
-# from src.CNN.training import CrossValidationRunner, set_seed
-#
-# __all__ = [
-#     'SingleScaleCNN',
-#     'MultiScaleCNN',
-#     'ResNet18Transfer',
-#     'UTRPDataset',
-#     'compute_class_weights',
-#     'create_dataloaders',
-#     'CrossValidationRunner',
-#     'set_seed'
-# ]
+"""
+cnn module for pre-af detection using recurrence plot analysis.
+"""
+
+from src.CNN.utils.utils import (
+    get_device,
+    get_subject_group,
+    set_seed,
+    DEVICE,
+    N_FOLDS,
+    N_SUBBANDS,
+    SUBBAND_KEYS,
+    BATCH_SIZE,
+    SEED
+)
+
+from src.CNN.utils.datasets import (
+    CombinedH5Dataset
+)
+
+from src.CNN.models.models import (
+    FullBandCNN,
+    MultiScaleCNN
+)
+
+from src.CNN.utils.evaluation import (
+    get_predictions,
+    get_attention_weights,
+    compute_metrics,
+    find_optimal_threshold_youden,
+    evaluate_model_folds,
+)
+
+from src.CNN.utils.statistics import (
+    compute_rosenthal_r,
+    friedman_test,
+    wilcoxon_pairwise,
+    holm_bonferroni_correction,
+    pairwise_wilcoxon_with_correction,
+    compute_summary_stats,
+    compare_models
+)
+
+from src.CNN.utils.plotting import (
+    plot_roc_curves,
+    plot_pr_curves,
+    plot_metric_boxplots,
+    plot_roc_and_pr_combined,
+    DEFAULT_COLORS
+)
+
+__all__ = [
+    # utils
+    'get_device',
+    'get_subject_group',
+    'set_seed',
+    'DEVICE',
+    'N_FOLDS',
+    'N_SUBBANDS',
+    'SUBBAND_KEYS',
+    'BATCH_SIZE',
+    'SEED',
+    # datasets
+    'CombinedH5Dataset',
+    # models
+    'FullBandCNN',
+    'MultiScaleCNN',
+    # evaluation
+    'get_predictions',
+    'get_attention_weights',
+    'compute_metrics',
+    'find_optimal_threshold_youden',
+    'evaluate_model_folds',
+    # statistics
+    'compute_rosenthal_r',
+    'friedman_test',
+    'wilcoxon_pairwise',
+    'holm_bonferroni_correction',
+    'pairwise_wilcoxon_with_correction',
+    'compute_summary_stats',
+    'compare_models',
+    # plotting
+    'plot_roc_curves',
+    'plot_pr_curves',
+    'plot_metric_boxplots',
+    'plot_roc_and_pr_combined',
+    'DEFAULT_COLORS',
+]

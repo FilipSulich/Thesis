@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-def make_backbone(in_ch: int) -> nn.Sequential:
+def convolutional_backbone(in_ch: int) -> nn.Sequential:
     return nn.Sequential(
         # Block 1: 256→128
         nn.Conv2d(in_ch, 16, kernel_size=3, padding=1, bias=False),
@@ -22,43 +22,36 @@ def make_backbone(in_ch: int) -> nn.Sequential:
         nn.Conv2d(64, 64, kernel_size=3, padding=1, bias=False),
         nn.BatchNorm2d(64), nn.ReLU(inplace=True),
 
-        nn.AdaptiveAvgPool2d((1, 1)),
+        nn.AdaptiveAvgPool2d((1, 1)), #global average pooling
         nn.Flatten(),   # → (B, 64)
     )
 
 class MultiScaleCNN(nn.Module):
     """
-    Late fusion with learned branch weights.
-    Each subband gets its own backbone, then an attention gate
-    learns to weight each branch's contribution before the classifier.
-
-    The attention weights are interpretable — after training, inspect
-    them to see which subbands the model relied on most.
+    Late feature-fusion with learned branch weights.
+    Each subband gets its own backbone, then an attention gate learns to weight each branch's contribution before the classifier.
     """
 
     def __init__(self, n_subbands: int = 4, dropout: float = 0.5):
         super().__init__()
         self.n_subbands = n_subbands
-        self.use_uniform_attention = False  # Flag for uniform vs learned attention
 
         # Independent backbone per subband
         self.branches = nn.ModuleList([
-            make_backbone(in_ch=3) for _ in range(n_subbands)
+            convolutional_backbone(in_ch=3) for _ in range(n_subbands)
         ])
 
         feat_dim = 64  # output of each backbone
 
         # Branch attention gate
         # Takes all branch features, outputs a scalar weight per branch
-        # Softmax ensures weights sum to 1
         self.attention = nn.Sequential(
             nn.Linear(feat_dim * n_subbands, n_subbands * 4),
             nn.ReLU(inplace=True),
             nn.Linear(n_subbands * 4, n_subbands),
-            nn.Sigmoid(),  # weights sum to 1 across subbands
+            nn.Sigmoid(),
         )
 
-        # Old model with averaging: expects feat_dim (64)
         self.head = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(feat_dim, 64),
@@ -66,15 +59,6 @@ class MultiScaleCNN(nn.Module):
             nn.Dropout(dropout * 0.5),
             nn.Linear(64, 2),
         )
-
-        # New model with concatenation: expects feat_dim * n_subbands
-        # self.head = nn.Sequential(
-        #     nn.Dropout(dropout),
-        #     nn.Linear(feat_dim * n_subbands, 64),
-        #     nn.ReLU(inplace=True),
-        #     nn.Dropout(dropout * 0.5),
-        #     nn.Linear(64, 2),
-        # )
 
         self._init_weights()
 
@@ -90,22 +74,15 @@ class MultiScaleCNN(nn.Module):
         # Stack: (B, n_subbands, 64)
         stacked = torch.stack(branch_feats, dim=1)
 
-        # Compute attention weights
-        if self.use_uniform_attention:
-            # Use uniform weights (1/n_subbands for each branch)
-            batch_size = stacked.size(0)
-            weights = torch.ones(batch_size, self.n_subbands, device=x.device) / self.n_subbands
-        else:
-            # Use learned attention weights
-            # (B, n_subbands*64) → (B, n_subbands)
-            flat = stacked.reshape(stacked.size(0), -1)
-            weights = self.attention(flat)  # (B, n_subbands)
+        # Use learned attention weights
+        # (B, n_subbands*64) → (B, n_subbands)
+        flat = stacked.reshape(stacked.size(0), -1)
+        weights = self.attention(flat)  # (B, n_subbands)
 
         # Weighted sum of branch features
         # weights: (B, n_subbands, 1), stacked: (B, n_subbands, 64)
         weights = weights.unsqueeze(-1)  # (B, n_subbands, 1)
         fused = (stacked * weights).sum(dim=1)  # (B, 64)
-        # fused = torch.cat(branch_feats, dim=1)
 
         return self.head(fused)
 
@@ -119,17 +96,6 @@ class MultiScaleCNN(nn.Module):
             stacked = torch.stack(branch_feats, dim=1)
             flat = stacked.reshape(stacked.size(0), -1)
             return self.attention(flat)  # (B, n_subbands)
-
-    def set_uniform_attention(self):
-        """
-        Replace learned attention weights with uniform weights (1/n_subbands).
-        Useful for ablation studies to see the effect of learned vs uniform attention.
-        """
-        self.use_uniform_attention = True
-
-    def set_learned_attention(self):
-        """Restore learned attention weights (default behavior)."""
-        self.use_uniform_attention = False
 
     def _init_weights(self):
         for m in self.modules():
@@ -147,16 +113,15 @@ class MultiScaleCNN(nn.Module):
     def count_params(self):
         return sum(p.numel() for p in self.parameters())
 
-class SingleScaleCNN(nn.Module):
+class FullBandCNN(nn.Module):
     """
-    Single-scale baseline using identical Tier4 backbone and head
-    as each branch in LateFusionWithAttention.
+    FullbandCNN baseline using identical backbone and head as each branch in MultiScaleCNN.
     Input:  (B, 3, 256, 256)
     Output: (B, 2)
     """
     def __init__(self, dropout: float = 0.5):
         super().__init__()
-        self.backbone = make_backbone(in_ch=3)   # → (B, 64)
+        self.backbone = convolutional_backbone(in_ch=3)   # → (B, 64)
 
         self.head = nn.Sequential(
             nn.Dropout(dropout),

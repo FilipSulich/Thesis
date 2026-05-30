@@ -45,26 +45,6 @@ class AMI:
         self.local_minima = minima_indices + 1  # +1 because lag starts at 1
         return self.local_minima
 
-    def plot(self):
-        if self.ami_values is None:
-            self.compute_ami()
-        if self.local_minima is None:
-            self.find_local_minima()
-
-        lags = np.arange(1, self.max_lag + 1)
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(lags, self.ami_values, 'b-', linewidth=1.5)
-
-        if len(self.local_minima) > 0:
-            ax.plot(self.local_minima, self.ami_values[self.local_minima - 1], 'ro', markersize=8, label='Local minima')
-        ax.set_xlabel('Time lag', fontsize=12)
-        ax.set_ylabel('Average Mutual Information', fontsize=12)
-        ax.set_title('AMI vs Time Lag', fontsize=14)
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        plt.show()
-
     def get_first_minimum(self):
         if self.local_minima is None:
             self.find_local_minima()

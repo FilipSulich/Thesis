@@ -68,22 +68,6 @@ class FNN:
         self.fnn_percentages = np.array(fnn_percentages)
         return self.fnn_percentages
 
-    def plot(self):
-        """Plot FNN percentage vs embedding dimension."""
-        if self.fnn_percentages is None:
-            self.compute_fnn()
-
-        dims = np.arange(1, self.max_dim + 1)
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(dims, self.fnn_percentages, 'bo-', linewidth=2, markersize=8)
-        ax.set_xlabel('Embedding Dimension', fontsize=12)
-        ax.set_ylabel('False Nearest Neighbors (%)', fontsize=12)
-        ax.set_title(f'FNN vs Dimension (tau={self.tau})', fontsize=14)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim([-5, max(self.fnn_percentages) + 10])
-        plt.show()
-
     def get_optimal_dimension(self, threshold=5.0):
         """Return the first dimension where FNN% drops below threshold."""
         if self.fnn_percentages is None:

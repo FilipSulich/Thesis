@@ -7,7 +7,7 @@ from pyrqa.computation import RPComputation, RQAComputation
 import numpy as np
 
 class RecurrencePlotGenerator:
-    def __init__(self, signal, time_delay, embedding_dim, epsilon, unthresholded=False, path = "/Users/filipsulich/Developer/uni/Thesis/Thesis/outputs/"):
+    def __init__(self, signal, time_delay, embedding_dim, epsilon, unthresholded=False, path = ""):
         self.time_series = TimeSeries(signal, embedding_dimension=embedding_dim, time_delay=time_delay)
         self.unthresholded = unthresholded
         self.epsilon = epsilon

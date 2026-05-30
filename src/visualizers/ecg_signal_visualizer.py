@@ -356,9 +356,9 @@ class ECGSignalVisualizer:
 
 if __name__ == '__main__':
     # Usage preserved for n31 and p01
-    data=Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data/data_old/paf")
+    data=Path("/data/paf")
     vis = ECGSignalVisualizer(data_dir=data)
-    # for rid in ['n06', 'p03']:
+    # for rid in ['p02','p07', 'p11']:
     #     vis.visualize_complete(record_id=rid, save_dir='/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new')
         # vis.visualize_complete_denoise(record_id=rid, save_dir='/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new_denoise')
     save_dir = Path("/Users/filipsulich/Developer/uni/Thesis/Thesis/data_new_new")
@@ -366,8 +366,8 @@ if __name__ == '__main__':
 
     # Generate the 2x7 comparison plot
     vis.plot_comparison_utrps(
-        record_paf='p03',
-        record_nsr='n06',
+        record_paf='p11',
+        record_nsr='n05',
         segment_idx=0,
-        save_path=save_dir / 'utrp_comparison_p03_vs_n06.png'
+        save_path=save_dir / 'utrp_comparison_p03_vs_n05.png'
     )
