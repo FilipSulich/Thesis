@@ -18,13 +18,13 @@ DATA_ROOT = Path(__file__).parent.parent.parent.parent
 
 H5_DIR = DATA_ROOT / 'data' / 'processed_data' / 'urp_no_denoise'
 
-ABLATION_BASE = DATA_ROOT / 'results_final' / 'final_ablation'
+ABLATION_BASE = DATA_ROOT / 'results_final' / 'ablation_weights'
 
 RESULTS_HIGH_FREQ = ABLATION_BASE / 'high_freq_d2d4'
 RESULTS_LOW_FREQ = ABLATION_BASE / 'low_freq_d5d8'
 RESULTS_FULL = DATA_ROOT / 'results_final' / 'models_final_weights' / 'multi'
 
-OUTPUT_DIR = DATA_ROOT / 'results_final' / 'ablation_cv_h5'
+OUTPUT_DIR = DATA_ROOT / 'results_final' / 'ablation_results'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 BATCH_SIZE = 32
@@ -35,15 +35,14 @@ SUBBANDS_FULL = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
 
 
 def main():
-    print("loading datasets:")
-
-    dataset_high = CombinedH5Dataset(H5_DIR, mode='multi', cache=True, subband_keys=SUBBANDS_HIGH_FREQ)
-    dataset_low = CombinedH5Dataset(H5_DIR, mode='multi', cache=True, subband_keys=SUBBANDS_LOW_FREQ)
-    dataset_full = CombinedH5Dataset(H5_DIR, mode='multi', cache=True, subband_keys=SUBBANDS_FULL)
-
+    print("loading datasets")
+    dataset_high = CombinedH5Dataset(H5_DIR, mode='multi', subband_keys=SUBBANDS_HIGH_FREQ)
+    dataset_low = CombinedH5Dataset(H5_DIR, mode='multi', subband_keys=SUBBANDS_LOW_FREQ)
+    dataset_full = CombinedH5Dataset(H5_DIR, mode='multi', subband_keys=SUBBANDS_FULL)
+    print("datasets loaded")
     results = {}
 
-    # high-frequency ablation
+    print("evaluating models")
     results['High-frequency'] = evaluate_model_folds(
         model_class=MultiScaleCNN,
         model_params={'n_subbands': len(SUBBANDS_HIGH_FREQ), 'dropout': 0.5},
@@ -51,10 +50,8 @@ def main():
         dataset=dataset_high,
         device=DEVICE,
         batch_size=BATCH_SIZE,
-        collect_attention=True
     )
 
-    # low-frequency ablation
     results['Low-frequency'] = evaluate_model_folds(
         model_class=MultiScaleCNN,
         model_params={'n_subbands': len(SUBBANDS_LOW_FREQ), 'dropout': 0.5},
@@ -62,10 +59,8 @@ def main():
         dataset=dataset_low,
         device=DEVICE,
         batch_size=BATCH_SIZE,
-        collect_attention=True
     )
 
-    # full multi-scale model
     results['Multi-scale'] = evaluate_model_folds(
         model_class=MultiScaleCNN,
         model_params={'n_subbands': len(SUBBANDS_FULL), 'dropout': 0.5},
@@ -73,8 +68,8 @@ def main():
         dataset=dataset_full,
         device=DEVICE,
         batch_size=BATCH_SIZE,
-        collect_attention=True
     )
+    print("models evaluated")
 
     stats = compare_models(
         results,
@@ -92,6 +87,7 @@ def main():
     output_json = OUTPUT_DIR / 'ablation_comparison_stats.json'
     with open(output_json, 'w') as f:
         json.dump(stats, f, indent=2)
+    print(f"analysis done and results saved to {output_json}")
 
 
 if __name__ == '__main__':

@@ -1,0 +1,414 @@
+{
+  "summary": {
+    "Full-band": {
+      "auc": {
+        "mean": 0.7930333333333334,
+        "std": 0.1295324812689995,
+        "median": 0.8171666666666666,
+        "min": 0.5333333333333333,
+        "max": 0.9783333333333333,
+        "values": [
+          0.5333333333333333,
+          0.6397777777777778,
+          0.9041666666666667,
+          0.8897222222222223,
+          0.679,
+          0.8725555555555556,
+          0.7991111111111111,
+          0.9783333333333333,
+          0.8292222222222222,
+          0.8051111111111111
+        ]
+      },
+      "auprc": {
+        "mean": 0.6661635392135545,
+        "std": 0.2517968568362712,
+        "median": 0.7441021015923477,
+        "min": 0.16521666770716048,
+        "max": 0.9676980867281745,
+        "values": [
+          0.16521666770716048,
+          0.3396177163749722,
+          0.8980285067158617,
+          0.8931426372392548,
+          0.441113097950428,
+          0.7957670599785324,
+          0.7268628401586884,
+          0.9676980867281745,
+          0.7613413630260069,
+          0.6728474162564654
+        ]
+      },
+      "sensitivity": {
+        "mean": 0.7321111111111112,
+        "std": 0.18895191758882426,
+        "median": 0.7566666666666667,
+        "min": 0.26666666666666666,
+        "max": 0.9733333333333334,
+        "values": [
+          0.26666666666666666,
+          0.6166666666666667,
+          0.6222222222222222,
+          0.8888888888888888,
+          0.8,
+          0.7666666666666667,
+          0.7466666666666667,
+          0.9733333333333334,
+          0.8933333333333333,
+          0.7466666666666667
+        ]
+      },
+      "specificity": {
+        "mean": 0.7493333333333334,
+        "std": 0.11743603459850908,
+        "median": 0.7541666666666667,
+        "min": 0.52,
+        "max": 0.9666666666666667,
+        "values": [
+          0.7666666666666667,
+          0.6333333333333333,
+          0.9666666666666667,
+          0.7416666666666667,
+          0.52,
+          0.8066666666666666,
+          0.7166666666666667,
+          0.8666666666666667,
+          0.6833333333333333,
+          0.7916666666666666
+        ]
+      }
+    },
+    "Multi-scale": {
+      "auc": {
+        "mean": 0.8884703703703704,
+        "std": 0.07767201636497069,
+        "median": 0.8888333333333334,
+        "min": 0.7270370370370371,
+        "max": 0.9885555555555556,
+        "values": [
+          0.7270370370370371,
+          0.8973333333333333,
+          0.9853703703703705,
+          0.9446296296296297,
+          0.865111111111111,
+          0.8748888888888888,
+          0.8803333333333334,
+          0.9885555555555556,
+          0.9288888888888889,
+          0.7925555555555556
+        ]
+      },
+      "auprc": {
+        "mean": 0.8061227654539651,
+        "std": 0.1473877659599709,
+        "median": 0.8007376839726796,
+        "min": 0.4612213693289355,
+        "max": 0.9802306808273434,
+        "values": [
+          0.4612213693289355,
+          0.8058734277846469,
+          0.9802306808273434,
+          0.9337099947957191,
+          0.7169472652485046,
+          0.7310979853014271,
+          0.7956019401607123,
+          0.9780383676734461,
+          0.889939962532976,
+          0.7685666608859412
+        ]
+      },
+      "sensitivity": {
+        "mean": 0.7796666666666667,
+        "std": 0.15508822658310126,
+        "median": 0.7855555555555556,
+        "min": 0.4666666666666667,
+        "max": 0.9888888888888889,
+        "values": [
+          0.4666666666666667,
+          0.9666666666666667,
+          0.9888888888888889,
+          0.8111111111111111,
+          0.6833333333333333,
+          0.8666666666666667,
+          0.68,
+          0.92,
+          0.76,
+          0.6533333333333333
+        ]
+      },
+      "specificity": {
+        "mean": 0.8168333333333333,
+        "std": 0.122293930984148,
+        "median": 0.8616666666666666,
+        "min": 0.54,
+        "max": 0.9666666666666667,
+        "values": [
+          0.8,
+          0.54,
+          0.8916666666666667,
+          0.9166666666666666,
+          0.84,
+          0.7466666666666667,
+          0.8833333333333333,
+          0.9666666666666667,
+          0.9,
+          0.6833333333333333
+        ]
+      }
+    },
+    "Multi-scale denoised": {
+      "auc": {
+        "mean": 0.8668000000000001,
+        "std": 0.10623921967419647,
+        "median": 0.9114074074074074,
+        "min": 0.6635555555555555,
+        "max": 0.9843333333333333,
+        "values": [
+          0.7985185185185184,
+          0.8946666666666666,
+          0.9444444444444444,
+          0.9281481481481482,
+          0.9476666666666667,
+          0.9843333333333333,
+          0.7531111111111111,
+          0.9836666666666667,
+          0.7698888888888888,
+          0.6635555555555555
+        ]
+      },
+      "auprc": {
+        "mean": 0.800531377873871,
+        "std": 0.1618898670190302,
+        "median": 0.8706186758107747,
+        "min": 0.4655357460683675,
+        "max": 0.9756521529104869,
+        "values": [
+          0.4655357460683675,
+          0.8339395949203523,
+          0.9117533676857775,
+          0.922892990827183,
+          0.9072977567011971,
+          0.962774330797654,
+          0.7363988504303404,
+          0.9756521529104869,
+          0.6338047454283269,
+          0.655264242969025
+        ]
+      },
+      "sensitivity": {
+        "mean": 0.7414444444444446,
+        "std": 0.1966560260774955,
+        "median": 0.8138888888888889,
+        "min": 0.4666666666666667,
+        "max": 1.0,
+        "values": [
+          0.4666666666666667,
+          0.8166666666666667,
+          0.8111111111111111,
+          0.8666666666666667,
+          0.9333333333333333,
+          1.0,
+          0.6,
+          0.9333333333333333,
+          0.52,
+          0.4666666666666667
+        ]
+      },
+      "specificity": {
+        "mean": 0.8074444444444444,
+        "std": 0.061923489230812215,
+        "median": 0.7966666666666666,
+        "min": 0.7166666666666667,
+        "max": 0.9166666666666666,
+        "values": [
+          0.8277777777777777,
+          0.8733333333333333,
+          0.875,
+          0.8,
+          0.7933333333333333,
+          0.7466666666666667,
+          0.7416666666666667,
+          0.9166666666666666,
+          0.7833333333333333,
+          0.7166666666666667
+        ]
+      }
+    }
+  },
+  "friedman": {
+    "auc": {
+      "test": "friedman",
+      "statistic": 7.200000000000003,
+      "p_value": 0.02732372244729252,
+      "significant": true,
+      "groups": [
+        "Full-band",
+        "Multi-scale",
+        "Multi-scale denoised"
+      ]
+    },
+    "auprc": {
+      "test": "friedman",
+      "statistic": 7.800000000000011,
+      "p_value": 0.020241911445804273,
+      "significant": true,
+      "groups": [
+        "Full-band",
+        "Multi-scale",
+        "Multi-scale denoised"
+      ]
+    },
+    "sensitivity": {
+      "test": "friedman",
+      "statistic": 0.15384615384615968,
+      "p_value": 0.9259610786423133,
+      "significant": false,
+      "groups": [
+        "Full-band",
+        "Multi-scale",
+        "Multi-scale denoised"
+      ]
+    },
+    "specificity": {
+      "test": "friedman",
+      "statistic": 1.5897435897436014,
+      "p_value": 0.45163913366408637,
+      "significant": false,
+      "groups": [
+        "Full-band",
+        "Multi-scale",
+        "Multi-scale denoised"
+      ]
+    }
+  },
+  "pairwise": {
+    "auc": [
+      {
+        "test": "wilcoxon",
+        "statistic": 3.0,
+        "p_value": 0.009765625,
+        "effect_size": -0.7897065047448726,
+        "significant": true,
+        "comparison": "Full-band_vs_Multi-scale",
+        "adj_alpha": 0.016666666666666666,
+        "significant_corrected": true
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 16.0,
+        "p_value": 0.275390625,
+        "effect_size": -0.37067856345167494,
+        "significant": false,
+        "comparison": "Full-band_vs_Multi-scale denoised",
+        "adj_alpha": 0.025,
+        "significant_corrected": false
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 18.0,
+        "p_value": 0.375,
+        "effect_size": -0.3062127263296445,
+        "significant": false,
+        "comparison": "Multi-scale_vs_Multi-scale denoised",
+        "adj_alpha": 0.05,
+        "significant_corrected": false
+      }
+    ],
+    "auprc": [
+      {
+        "test": "wilcoxon",
+        "statistic": 3.0,
+        "p_value": 0.009765625,
+        "effect_size": -0.7897065047448726,
+        "significant": true,
+        "comparison": "Full-band_vs_Multi-scale",
+        "adj_alpha": 0.016666666666666666,
+        "significant_corrected": true
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 10.0,
+        "p_value": 0.083984375,
+        "effect_size": -0.5640760748177662,
+        "significant": false,
+        "comparison": "Full-band_vs_Multi-scale denoised",
+        "adj_alpha": 0.025,
+        "significant_corrected": false
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 23.0,
+        "p_value": 0.6953125,
+        "effect_size": -0.14504813352456844,
+        "significant": false,
+        "comparison": "Multi-scale_vs_Multi-scale denoised",
+        "adj_alpha": 0.05,
+        "significant_corrected": false
+      }
+    ],
+    "sensitivity": [
+      {
+        "test": "wilcoxon",
+        "statistic": 16.0,
+        "p_value": 0.49609375,
+        "effect_size": -0.2435123110112404,
+        "significant": false,
+        "comparison": "Multi-scale_vs_Multi-scale denoised",
+        "adj_alpha": 0.016666666666666666,
+        "significant_corrected": false
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 23.0,
+        "p_value": 0.6953125,
+        "effect_size": -0.14504813352456844,
+        "significant": false,
+        "comparison": "Full-band_vs_Multi-scale",
+        "adj_alpha": 0.025,
+        "significant_corrected": false
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 26.0,
+        "p_value": 0.921875,
+        "effect_size": -0.048349377841522816,
+        "significant": false,
+        "comparison": "Full-band_vs_Multi-scale denoised",
+        "adj_alpha": 0.05,
+        "significant_corrected": false
+      }
+    ],
+    "specificity": [
+      {
+        "test": "wilcoxon",
+        "statistic": 15.0,
+        "p_value": 0.232421875,
+        "effect_size": -0.40291148201269017,
+        "significant": false,
+        "comparison": "Full-band_vs_Multi-scale",
+        "adj_alpha": 0.016666666666666666,
+        "significant_corrected": false
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 17.0,
+        "p_value": 0.322265625,
+        "effect_size": -0.33844564489065976,
+        "significant": false,
+        "comparison": "Full-band_vs_Multi-scale denoised",
+        "adj_alpha": 0.025,
+        "significant_corrected": false
+      },
+      {
+        "test": "wilcoxon",
+        "statistic": 14.0,
+        "p_value": 0.359375,
+        "effect_size": -0.3184391759377759,
+        "significant": false,
+        "comparison": "Multi-scale_vs_Multi-scale denoised",
+        "adj_alpha": 0.05,
+        "significant_corrected": false
+      }
+    ]
+  }
+}

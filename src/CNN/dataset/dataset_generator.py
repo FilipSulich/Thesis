@@ -36,10 +36,6 @@ N_LEVELS_SWT = 10
 PAD_SAMPLES = math.ceil(SEGMENT_SAMPLES / 2**N_LEVELS_SWT) * 2**N_LEVELS_SWT
 
 
-# ============================================================================
-# helper functions
-# ============================================================================
-
 def _pad(x: np.ndarray) -> np.ndarray:
     """pad signal to power-of-2 length for SWT."""
     pad = PAD_SAMPLES - len(x)
@@ -65,11 +61,6 @@ def _apply_soft_threshold(coeffs: List[Tuple[np.ndarray, np.ndarray]]) -> List[T
         denoised.append((cA, cD_clean))
 
     return denoised
-
-
-# ============================================================================
-# denoising and decomposition
-# ============================================================================
 
 def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET,n_levels: int = N_LEVELS_SWT,subband_levels: List[int] = SUBBAND_LEVELS,) -> Dict[str, np.ndarray]:
     """

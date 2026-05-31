@@ -12,8 +12,8 @@ __pycache__
 /data/outputs
 /data_new_new
 /results_final/results_kfold
-/results_final/results_kfold2
-/results_final
+/old/results_kfold2
 /data_new_new_denoise
 /results_kfold2
 /src/experiment_results
+/old
