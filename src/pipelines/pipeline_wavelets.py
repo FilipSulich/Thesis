@@ -113,7 +113,7 @@ class Pipeline:
 
     def pipeline_single(self, signal):
         """
-        returns signal without decomposition for single-scale baseline comparison
+        returns signal without decomposition for full-band baseline comparison
 
         Args:
             signal (np.ndarray): input time series signal

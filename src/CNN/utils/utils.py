@@ -1,13 +1,12 @@
-"""
-Shared utility functions for CNN training and evaluation.
-"""
-
 import re
 import numpy as np
 import torch
 
 
 def get_device():
+    """
+    gets the available device for PyTorch (GPU, MPS, or CPU).
+    """
     if torch.cuda.is_available():
         return torch.device('cuda')
     elif torch.backends.mps.is_available():
@@ -20,9 +19,9 @@ DEVICE = get_device()
 
 def get_subject_group(record_id: str) -> int:
     """
-    Extract patient group from record ID for cross-validation.
+    extract patient group from record ID for cross-validation.
 
-    Grouping strategy:
+    grouping strategy:
     - Pre-AF (p*): Odd-even pairs from same patient
       p01 & p02 → group 101
       p03 & p04 → group 102
@@ -33,7 +32,7 @@ def get_subject_group(record_id: str) -> int:
       n03, n03c, n04, n04c → group 202 (all from patient 2)
       n05, n05c, n06, n06c → group 203, etc.
 
-    This prevents data leakage between sets by keeping all recordings from the same patient in the same fold.
+    this prevents data leakage between sets by keeping all recordings from the same patient in the same fold.
     """
     match = re.search(r'(\d+)', record_id)
     if not match:

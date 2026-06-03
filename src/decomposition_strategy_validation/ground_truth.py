@@ -1,5 +1,3 @@
-"""ground truth generation and loading for decomposition experiments."""
-
 import os
 import json
 import numpy as np
@@ -119,7 +117,7 @@ def load_ground_truth(band_names, json_path, npz_path=None):
 
 def get_or_generate_ground_truth(config, band_names, force_regenerate=False):
     """
-    load existing ground truth from files or generate new ground truth if files not found or regeneration is forced
+    load existing ground truth from files or generate new ground truth if files not found
 
     Args:
         config (ExperimentConfig): experiment configuration instance containing output directory and parameters

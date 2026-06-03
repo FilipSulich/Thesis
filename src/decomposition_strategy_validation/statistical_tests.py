@@ -7,29 +7,10 @@ from scikit_posthocs import posthoc_dunn
 import pingouin as pg
 
 
-def get_significance_notation(p_value):
-    """
-    convert p-value to standard significance notation using asterisk symbols
-
-    Args:
-        p_value (float): p-value from statistical test
-
-    Returns:
-        str: significance notation ('***' for p<0.001, '**' for p<0.01, '*' for p<0.05, 'ns' for not significant)
-    """
-    if p_value < 0.001:
-        return '***'
-    elif p_value < 0.01:
-        return '**'
-    elif p_value < 0.05:
-        return '*'
-    else:
-        return 'ns'
-
 
 def run_kruskal_wallis(agg_df, metric, pipeline_names):
     """
-    run kruskal-wallis H-test to detect overall differences in metric values across multiple pipelines
+    run kruskal-wallis test to detect differences in metric values across multiple pipelines
 
     Args:
         agg_df (pandas.DataFrame): aggregated results dataframe containing pipeline and metric columns
@@ -37,7 +18,7 @@ def run_kruskal_wallis(agg_df, metric, pipeline_names):
         pipeline_names (list): list of pipeline names to include in the test
 
     Returns:
-        dict: dictionary containing test name, statistic, p-value, and significance notation
+        dict: dictionary containing test name, statistic, p-value
     """
     groups = [
         agg_df[agg_df['pipeline'] == p][metric].dropna().values
@@ -54,7 +35,6 @@ def run_kruskal_wallis(agg_df, metric, pipeline_names):
         'statistic': h_stat,
         'p_value': kw_pvalue,
         'rank_biserial': np.nan,
-        'significance': get_significance_notation(kw_pvalue)
     }
 
 
@@ -68,7 +48,7 @@ def run_dunn_posthoc(agg_df, metric, pipeline_names):
         pipeline_names (list): list of pipeline names to compare pairwise
 
     Returns:
-        list: list of dictionaries containing pairwise comparison results with p-values, rank-biserial correlations, and significance notations
+        list: list of dictionaries containing pairwise comparison results with p-values, rank-biserial correlations
     """
     dunn_df = posthoc_dunn(
         agg_df,
@@ -88,7 +68,7 @@ def run_dunn_posthoc(agg_df, metric, pipeline_names):
                 continue
 
             mwu_result = pg.mwu(x, y)
-            rank_biserial = mwu_result['RBC'].values[0]  # RBC = rank-biserial correlation
+            rank_biserial = mwu_result['RBC'].values[0]
 
             dunn_pvalue = dunn_df.loc[pipe1, pipe2]
 
@@ -100,7 +80,6 @@ def run_dunn_posthoc(agg_df, metric, pipeline_names):
                 'statistic': np.nan,
                 'p_value': dunn_pvalue,
                 'rank_biserial': rank_biserial,
-                'significance': get_significance_notation(dunn_pvalue)
             })
 
     return results

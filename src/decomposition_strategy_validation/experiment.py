@@ -21,7 +21,7 @@ from src.decomposition_strategy_validation.plotting import (
 
 def run_trials(config, band_names, pipeline_names, ground_truth, ground_truth_data, n_trials=100, metrics=None):
     """
-    run multiple trials of pipeline comparison using composite signals with random phases to assess decomposition consistency
+    run multiple trials of pipeline comparison using composite signals with random phases
 
     Args:
         config (ExperimentConfig): experiment configuration instance with signal and decomposition parameters
@@ -42,9 +42,8 @@ def run_trials(config, band_names, pipeline_names, ground_truth, ground_truth_da
 
     for trial in range(n_trials):
         if (trial + 1) % 10 == 0:
-            print(f'  trial {trial + 1}/{n_trials}')
+            print(f' trial {trial + 1}/{n_trials}')
 
-        #signal with a random phase
         sig = generate_composite_sine(
             config.n, config.fs, config.subband_freqs
         )
@@ -83,6 +82,8 @@ def run_experiment(config, band_names, pipeline_names, n_trials=100, metrics=Non
         metrics = DEFAULT_METRICS
 
     os.makedirs(config.output_dir, exist_ok=True)
+
+    print("running experiment....")
 
     ground_truth, ground_truth_data = get_or_generate_ground_truth(
         config, band_names, force_regenerate=False

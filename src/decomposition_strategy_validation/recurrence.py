@@ -14,7 +14,7 @@ from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerat
 
 def compute_distance_matrix(signal, tau, m):
     """
-    compute unthresholded (continuous) distance matrix for a time series signal using phase space reconstruction
+    compute unthresholded recurrence plot (URP) for a time series signal
 
     Args:
         signal (numpy.ndarray): input time series signal
@@ -22,7 +22,7 @@ def compute_distance_matrix(signal, tau, m):
         m (int): embedding dimension for phase space reconstruction
 
     Returns:
-        numpy.ndarray: unthresholded distance matrix with continuous values representing pairwise distances
+        numpy.ndarray: URP with continuous values representing pairwise distances
     """
     ts = TimeSeries(signal, embedding_dimension=m, time_delay=tau)
     settings = Settings(

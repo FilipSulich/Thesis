@@ -1,5 +1,3 @@
-"""decomposition strategy selection package."""
-
 # config
 from src.decomposition_strategy_validation.config import (
     ExperimentConfig,
@@ -51,12 +49,10 @@ from src.decomposition_strategy_validation.ground_truth import (
 from src.decomposition_strategy_validation.pipeline_analyzer import (
     decompose_signal,
     analyze_pipeline,
-    # analyze_all_pipelines,
 )
 
 # statistical tests
 from src.decomposition_strategy_validation.statistical_tests import (
-    get_significance_notation,
     run_kruskal_wallis,
     run_dunn_posthoc,
     run_statistical_analysis,
@@ -109,7 +105,6 @@ __all__ = [
     'analyze_pipeline',
     # 'analyze_all_pipelines',
     # statistical tests
-    'get_significance_notation',
     'run_kruskal_wallis',
     'run_dunn_posthoc',
     'run_statistical_analysis',

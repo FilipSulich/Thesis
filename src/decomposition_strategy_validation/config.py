@@ -9,16 +9,16 @@ class ExperimentConfig:
 
     Attributes:
         fs (int): sampling frequency in Hz (default: 128)
-        n (int): signal length in samples (default: 1280)
+        n (int): signal length in samples (default: 1024)
         level (int): wavelet decomposition level (default: 4)
-        wavelet (str): wavelet type identifier (default: 'db4')
+        wavelet (str): wavelet function (default: 'db4')
         subband_freqs (dict): mapping of subband names to their center frequencies in Hz
         output_dir (str): directory path for saving results and outputs
     """
 
     # signal parameters
     fs: int = 128           # sampling frq
-    n: int = 1280           # signal length
+    n: int = 1024           # signal length
 
     # wavelet parameters
     level: int = 4          # decomposition level

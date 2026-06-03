@@ -88,8 +88,7 @@ def analyze_pipeline(signal, pipeline_name, config, band_names, ground_truth=Non
         hamming_distance = np.nan
         rp_pattern_corr = np.nan
 
-        if (ground_truth_data is not None and band in ground_truth_data and metrics['rp_matrix'] is not None):
-
+        if ground_truth_data is not None and band in ground_truth_data and metrics['rp_matrix'] is not None:
             ref_rp = extract_rp_array(ground_truth_data[band]['rp_matrix'])
             pipe_rp = extract_rp_array(metrics['rp_matrix'])
 

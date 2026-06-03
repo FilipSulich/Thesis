@@ -28,7 +28,7 @@ def convolutional_backbone(in_ch: int) -> nn.Sequential:
         nn.BatchNorm2d(64), nn.ReLU(inplace=True),
         nn.MaxPool2d(2),
 
-        # Block 4: 32 -> 32 (no pooling)
+        # Block 4: 32 ->  32 (no pooling)
         nn.Conv2d(64, 64, kernel_size=3, padding=1, bias=False),
         nn.BatchNorm2d(64), nn.ReLU(inplace=True),
 
@@ -38,18 +38,17 @@ def convolutional_backbone(in_ch: int) -> nn.Sequential:
 
 class MultiScaleCNN(nn.Module):
     """
-    multi-scale CNN with late feature fusion using learned attention weights for subband combination
+    multi-scale CNN with late feature fusion using learned attention weights for subband combination.
 
-    This architecture processes multiple frequency subbands through independent convolutional backbones,
-    then uses an attention mechanism to learn optimal weights for combining branch features before classification.
+    This architecture processes multiple frequency subbands through independent convolutional backbones, then uses an attention mechanism to learn optimal weights for combining subband features before classification.
     """
 
-    def __init__(self, n_subbands: int = 4, dropout: float = 0.5):
+    def __init__(self, n_subbands: int = 7, dropout: float = 0.5):
         """
         initializes the multi-scale CNN with independent branches and attention mechanism
 
         Args:
-            n_subbands (int): number of frequency subbands to process, defaults to 4
+            n_subbands (int): number of frequency subbands to process, defaults to 7
             dropout (float): dropout probability for regularization in classifier, defaults to 0.5
         """
         super().__init__()
@@ -113,7 +112,7 @@ class MultiScaleCNN(nn.Module):
 
     def get_attention_weights(self, x: torch.Tensor) -> torch.Tensor:
         """
-        computes attention weights for each subband without gradient tracking for post-training analysis
+        computes attention weights for each subband for after training analysis
 
         Args:
             x (torch.Tensor): input tensor of shape (B, n_subbands*3, 256, 256)

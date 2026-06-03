@@ -5,7 +5,11 @@ from src.decomposition_strategy_validation import (
 
 
 def main():
+    """
+    main function for running the experiment
+    """
 
+    # select the frequency placement condition by uncommenting the appriopiate line below:
     # method = "HARMONIC"
     method = "NON_HARMONIC"
 
@@ -28,13 +32,14 @@ def main():
             'D1': 61    # 32-64 Hz
         }
 
+    # below the experiment configuration is created with the specified parameters
     config = ExperimentConfig(
         fs=128,
         n=1024,
         level=4,
         wavelet='db4',
         subband_freqs=subband_freq,
-        output_dir=f'results_{method}'
+        output_dir=f'results_{method.lower()}'
     )
 
     band_names = ['D1', 'D2', 'D3', 'D4', 'A4']
@@ -42,7 +47,6 @@ def main():
 
     agg_df, stats_df = run_experiment(config=config,band_names=band_names,pipeline_names=pipeline_names,n_trials=100)
     print("experiment finished\n")
-    print(stats_df)
 
 
 if __name__ == '__main__':

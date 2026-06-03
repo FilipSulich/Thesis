@@ -1,13 +1,9 @@
-"""
-dataset generator for URP images with wavelet decomposition.
-"""
-
 import json
 import math
 import random
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 import cv2
 import h5py
 import numpy as np
@@ -22,24 +18,22 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
 DATA_ROOT = Path(__file__).parent.parent.parent.parent
-DATA_DIR = DATA_ROOT / 'data_container' / 'data' / 'raw_data' / 'paf'
+DATA_DIR = DATA_ROOT / 'data_container' / 'raw_data' / 'paf'
 OUTPUT_DIR = DATA_ROOT / 'data_container' / 'data' / 'processed_data_new'
 
-# Configuration parameters
+#parameters
 FS_ORIG = 128
 FS_TARGET = 500
 SEGMENT_SAMPLES = FS_TARGET * 10
 N_SEGMENTS = 15
 URP_SIZE = 256
-
-# Decomposition parameters
 WAVELET = 'db8'
 SUBBAND_LEVELS = [2, 3, 4, 5, 6, 7, 8]
 N_LEVELS_SWT = 10
 PAD_SAMPLES = math.ceil(SEGMENT_SAMPLES / 2**N_LEVELS_SWT) * 2**N_LEVELS_SWT
 
 
-def _pad(x: np.ndarray) -> np.ndarray:
+def _pad(x: np.ndarray):
     """pad signal to power-of-2 length for SWT."""
     pad = PAD_SAMPLES - len(x)
     if pad <= 0:
@@ -47,7 +41,7 @@ def _pad(x: np.ndarray) -> np.ndarray:
     return np.pad(x, (0, pad), mode='reflect')
 
 
-def _apply_soft_threshold(coeffs: List[Tuple[np.ndarray, np.ndarray]]) -> List[Tuple[np.ndarray, np.ndarray]]:
+def _apply_soft_threshold(coeffs: List[Tuple[np.ndarray, np.ndarray]]):
     """
     apply soft thresholding to wavelet coefficients (following the Dohono and Johnstone thresholding approach).
 
@@ -65,7 +59,7 @@ def _apply_soft_threshold(coeffs: List[Tuple[np.ndarray, np.ndarray]]) -> List[T
 
     return denoised
 
-def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET,n_levels: int = N_LEVELS_SWT,subband_levels: List[int] = SUBBAND_LEVELS,) -> Dict[str, np.ndarray]:
+def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET,n_levels: int = N_LEVELS_SWT,subband_levels: List[int] = SUBBAND_LEVELS):
     """
     extract subbands without denoising (direct iSWT per subband).
 
@@ -87,7 +81,7 @@ def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET
     return subbands
 
 
-def denoise_and_extract_subbands(signal_padded: np.ndarray,wavelet: str = WAVELET,n_levels: int = N_LEVELS_SWT,subband_levels: List[int] = SUBBAND_LEVELS,) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+def denoise_and_extract_subbands(signal_padded: np.ndarray,wavelet: str = WAVELET,n_levels: int = N_LEVELS_SWT,subband_levels: List[int] = SUBBAND_LEVELS):
     """
     single SWT decomposition with denoising and subband extraction.
 
@@ -120,8 +114,7 @@ def denoise_and_extract_subbands(signal_padded: np.ndarray,wavelet: str = WAVELE
 
     return denoised, subbands
 
-
-def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE) -> Optional[np.ndarray]:
+def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE):
     """
     compute unthresholded recurrence plot (URP) with JET colormap.
 
@@ -157,11 +150,11 @@ def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE) -> O
     except Exception as e:
         return None
 
-def build_subject_groups(nsr_records: List[str], preaf_records: List[str]) -> List[Tuple[str, List[str], int]]:
+def build_subject_groups(nsr_records: List[str], preaf_records: List[str]):
     """
     group paired recordings by patient
 
-    NSR:   (n01, n01c) → one subject group
+    NSR:   (n01, n01c, n02, n02c) → one subject group
     PreAF: (p01, p02)  → one subject group (paired odd/even)
 
     returns:
@@ -171,7 +164,7 @@ def build_subject_groups(nsr_records: List[str], preaf_records: List[str]) -> Li
     preaf_set = set(preaf_records)
     subjects = []
 
-    # NSR patients: n01 and n01c are from same patient
+    # NSR patients: n01, n01c, n02, n02c are from same patient
     for i in range(1, 51, 2):
         recs = [r for r in [f'n{i:02d}', f'n{i:02d}c', f'n{i+1:02d}', f'n{i+1:02d}c'] if r in nsr_set]
         if recs:
@@ -185,7 +178,7 @@ def build_subject_groups(nsr_records: List[str], preaf_records: List[str]) -> Li
 
     return subjects
 
-def split_subjects_721(subjects: List[Tuple],seed: int = 42) -> Dict[str, List[str]]:
+def split_subjects_721(subjects: List[Tuple],seed: int = 42):
     """
     split subjects into train/val/test (70/20/10) while keeping pairs together.
 
@@ -239,7 +232,7 @@ class DatasetGenerator:
         if mode not in ('single', 'multi', 'both'):
             raise ValueError(f"invalid mode: {mode}")
 
-    def _load_signal(self, record_id: str) -> Optional[np.ndarray]:
+    def _load_signal(self, record_id: str):
         """load and resample ECG signal from WFDB record."""
         try:
             rec = wfdb.rdrecord(str(DATA_DIR / record_id))
@@ -249,7 +242,7 @@ class DatasetGenerator:
         except Exception as e:
             return None
 
-    def _extract_segments(self, signal: np.ndarray) -> List[np.ndarray]:
+    def _extract_segments(self, signal: np.ndarray):
         """extract N evenly-spaced segments from signal."""
         max_start = len(signal) - SEGMENT_SAMPLES
         if max_start <= 0:
@@ -262,7 +255,7 @@ class DatasetGenerator:
                 segs.append((seg.astype(np.float32)))
         return segs
 
-    def _process_record(self,record_id: str,label: int,tau_single: int,m_single: int,subband_tau: Dict,subband_m: Dict) -> List[Dict]:
+    def _process_record(self,record_id: str,label: int,tau_single: int,m_single: int,subband_tau: Dict,subband_m: Dict):
         """
         process one record into URP images.
 
@@ -282,9 +275,9 @@ class DatasetGenerator:
             seg_pad = _pad(seg)
             images = {}
 
-            # single-scale URP
+            # full-band URP
             if self.mode in ('single', 'both'):
-                # for single-scale, always use denoised signal
+                # for full-band, always use denoised signal
                 denoised, _ = denoise_and_extract_subbands(
                     seg_pad, self.wavelet, N_LEVELS_SWT, SUBBAND_LEVELS
                 )
@@ -328,7 +321,7 @@ class DatasetGenerator:
 
         return results
 
-    def _save_hdf5(self, samples: List[Dict], path: Path) -> None:
+    def _save_hdf5(self, samples: List[Dict], path: Path):
         """save processed samples to HDF5 file."""
         if not samples:
             return
@@ -379,7 +372,7 @@ class DatasetGenerator:
         generate complete URP dataset from ECG recordings.
 
         creates train/val/test splits with:
-          - single-scale URPs from denoised full-band signal
+          - full-band URPs from denoised full-band signal
           - multi-scale URPs from denoised wavelet subbands (D2-D8)
         """
         with open(params_file) as f:

@@ -1,7 +1,3 @@
-"""
-Dataset classes for loading UTRP data_container from HDF5 files.
-"""
-
 import numpy as np
 import torch
 import h5py

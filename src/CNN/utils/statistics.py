@@ -1,13 +1,16 @@
-"""
-Statistical testing utilities for model comparison.
-"""
-
 import numpy as np
 from scipy.stats import wilcoxon, friedmanchisquare
 
 def compute_rosenthal_r(x, y):
     """
-    Compute rosenthal's r effect size for wilcoxon signed-rank test.
+    computes rosenthal's r effect size for wilcoxon signed-rank test
+
+    Args:
+        x (list): first group of values
+        y (list): second group of values
+
+    Returns:
+        float: rosenthal's r effect size value
     """
     n = len(x)
     result = wilcoxon(x, y, alternative="two-sided", method="approx")
@@ -18,14 +21,14 @@ def compute_rosenthal_r(x, y):
 
 def friedman_test(data_dict, metric='auc'):
     """
-    Perform friedman test across multiple groups.
+    performs friedman test to compare metric values across multiple model groups
 
-    args:
-        data_dict: dict mapping group names to list of fold results
-        metric: metric name to extract from fold results
+    Args:
+        data_dict (dict): mapping of group names to list of fold results
+        metric (str): metric name to extract from fold results
 
-    returns:
-        dict with statistic, p_value, and significance
+    Returns:
+        dict: test results with statistic, p_value, and significance flag
     """
     groups = []
     group_names = []
@@ -48,15 +51,15 @@ def friedman_test(data_dict, metric='auc'):
 
 def wilcoxon_pairwise(group1, group2, metric='auc'):
     """
-    Perform wilcoxon signed-rank test between two groups.
+    performs wilcoxon signed-rank test between two model groups
 
-    args:
-        group1: list of fold results for group 1
-        group2: list of fold results for group 2
-        metric: metric name to extract
+    Args:
+        group1 (list): list of fold results for first group
+        group2 (list): list of fold results for second group
+        metric (str): metric name to extract and compare
 
-    returns:
-        dict with statistic, p_value, effect_size, and significance
+    Returns:
+        dict: test results with statistic, p_value, effect_size, and significance flag
     """
     values1 = [fold[metric] for fold in group1]
     values2 = [fold[metric] for fold in group2]
@@ -75,14 +78,14 @@ def wilcoxon_pairwise(group1, group2, metric='auc'):
 
 def holm_bonferroni_correction(comparisons, alpha=0.05):
     """
-    apply holm-bonferroni correction to multiple comparisons.
+    applies holm-bonferroni correction for multiple testing to control family-wise error rate
 
-    args:
-        comparisons: list of dicts with 'p_value' key
-        alpha: significance level (default 0.05)
+    Args:
+        comparisons (list): list of comparison dictionaries each with 'p_value' key
+        alpha (float): significance level threshold
 
-    returns:
-        updated comparisons with corrected significance
+    Returns:
+        list: updated comparisons with corrected significance flags
     """
     sorted_comps = sorted(comparisons, key=lambda x: x['p_value'])
     n = len(sorted_comps)
@@ -103,15 +106,15 @@ def holm_bonferroni_correction(comparisons, alpha=0.05):
 
 def pairwise_wilcoxon_with_correction(data_dict, metric='auc', alpha=0.05):
     """
-    Perform all pairwise wilcoxon tests with holm-bonferroni correction.
+    performs all pairwise wilcoxon tests between model groups with holm-bonferroni correction
 
-    args:
-        data_dict: dict mapping group names to list of fold results
-        metric: metric name to test
-        alpha: significance level (default 0.05)
+    Args:
+        data_dict (dict): mapping of group names to list of fold results
+        metric (str): metric name to test
+        alpha (float): significance level threshold
 
-    returns:
-        list of comparison results with corrected significance
+    Returns:
+        list: pairwise comparison results with corrected significance flags
     """
     group_names = list(data_dict.keys())
     comparisons = []
@@ -127,10 +130,14 @@ def pairwise_wilcoxon_with_correction(data_dict, metric='auc', alpha=0.05):
 
 def compute_summary_stats(fold_results, metric='auc'):
     """
-    Compute summary statistics for a metric across folds.
+    computes summary statistics for a single metric across all folds
 
-    returns:
-        dict with mean, std, median, min, max, values
+    Args:
+        fold_results (list): list of fold result dictionaries
+        metric (str): metric name to extract
+
+    Returns:
+        dict: summary with mean, std, median, min, max, and raw values
     """
     values = [fold[metric] for fold in fold_results]
 
@@ -146,19 +153,19 @@ def compute_summary_stats(fold_results, metric='auc'):
 
 def compare_models(data_dict, metrics=['auc', 'auprc'], alpha=0.05):
     """
-    Comprehensive statistical comparison of multiple models.
+    performs comprehensive statistical comparison of multiple models across specified metrics
 
-    args:
-        data_dict: dict mapping model names to list of fold results
-        metrics: list of metrics to test
-        alpha: significance level
+    Args:
+        data_dict (dict): mapping of model names to list of fold results
+        metrics (list): list of metric names to test
+        alpha (float): significance level threshold
 
-    returns:
-        dict with summary stats, friedman results, and pairwise comparisons
+    Returns:
+        dict: complete statistical analysis with summary stats, friedman results, and pairwise comparisons
     """
     for model_name, fold_results in data_dict.items():
         if not fold_results:
-            raise ValueError(f"Model '{model_name}' has no fold results. Check if checkpoints exist and are being loaded correctly.")
+            raise ValueError(f"model {model_name} has no fold results")
 
     results = {
         'summary': {},

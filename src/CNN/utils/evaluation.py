@@ -1,7 +1,3 @@
-"""
-Model evaluation utilities.
-"""
-
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
@@ -46,7 +42,7 @@ def get_attention_weights(model, loader, device):
     extracts and averages attention weights from a multi-scale model across all samples in a dataset
 
     Args:
-        model (nn.Module): trained multi-scale model with get_attention_weights method
+        model (nn.Module): trained multi-scale model
         loader (DataLoader): dataloader providing batches of data
         device (torch.device): device to run inference on (cpu or cuda)
 
@@ -70,7 +66,7 @@ def get_attention_weights(model, loader, device):
 
 def compute_metrics(labels, probs, threshold=0.5):
     """
-    computes comprehensive classification metrics including AUC, AUPRC, accuracy, F1, sensitivity, and specificity
+    computes comprehensive classification metrics including AUC, AUPRC, sensitivity, and specificity
 
     Args:
         labels (np.ndarray): true binary labels
@@ -78,7 +74,7 @@ def compute_metrics(labels, probs, threshold=0.5):
         threshold (float): classification threshold for converting probabilities to predictions, defaults to 0.5
 
     Returns:
-        dict: dictionary containing all computed metrics including auc, auprc, accuracy, f1, sensitivity, specificity, precision, and confusion matrix values
+        dict: dictionary containing all computed metrics including auc, auprc, sensitivity, specificity, and confusion matrix values
     """
     preds = (probs >= threshold).astype(int)
 
@@ -87,24 +83,16 @@ def compute_metrics(labels, probs, threshold=0.5):
     auc_roc = auc(fpr, tpr)
     auprc = average_precision_score(labels, probs)
 
-    # classification metrics
-    accuracy = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, zero_division=0)
-
     # confusion matrix
     tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
     sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
 
     return {
         'auc': float(auc_roc),
         'auprc': float(auprc),
-        'accuracy': float(accuracy),
-        'f1': float(f1),
         'sensitivity': float(sensitivity),
         'specificity': float(specificity),
-        'precision': float(precision),
         'tp': int(tp),
         'tn': int(tn),
         'fp': int(fp),
@@ -114,14 +102,14 @@ def compute_metrics(labels, probs, threshold=0.5):
 
 def find_optimal_threshold_youden(labels, probs):
     """
-    finds the optimal classification threshold by maximizing Youden's J statistic (sensitivity + specificity - 1)
+    finds the optimal classification threshold by maximizing Youden's Index (sensitivity + specificity - 1)
 
     Args:
         labels (np.ndarray): true binary labels
         probs (np.ndarray): predicted probabilities for positive class
 
     Returns:
-        float: optimal threshold value that maximizes the Youden index
+        float: optimal threshold value that maximizes the Youden Index
     """
     fpr, tpr, thresholds = roc_curve(labels, probs)
     j_scores = tpr - fpr

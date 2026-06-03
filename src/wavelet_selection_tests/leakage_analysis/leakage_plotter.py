@@ -98,11 +98,6 @@ class LeakagePlotter:
         ax.legend(handles=legend_elements, loc='lower right', fontsize=11)
 
         plt.tight_layout()
-
         plot_path = self.output_dir / 'der_boxplot.png'
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-
-        plot_path_pdf = self.output_dir / 'der_boxplot.pdf'
-        plt.savefig(plot_path_pdf, bbox_inches='tight')
-
         plt.close()

@@ -1,7 +1,3 @@
-"""
-Cross-validation trainer for both full-band and multi-scale models (with ablation variants).
-"""
-
 import json
 import numpy as np
 import torch
@@ -21,10 +17,10 @@ from src.CNN.utils.utils import DEVICE, get_subject_group, set_seed
 
 class CrossValidator:
     """
-    Cross-validation trainer supporting:
-    - Full-band models
-    - Multi-scale models with configurable subbands (ablation)
-    - Denoised or non-denoised data_container
+    cross-validation trainer supporting:
+    - full-band models
+    - multi-scale models with configurable subbands (ablation)
+    - denoised or non-denoised dataset
     """
 
     def __init__(
@@ -85,7 +81,7 @@ class CrossValidator:
         set_seed(self.seed)
 
     def _get_dataset_mode(self) -> str:
-        """Determine dataset loading mode based on configuration."""
+        """determine dataset loading mode based on configuration."""
         if self.model_type == 'single':
             return 'single'
         elif self.denoise:
@@ -94,7 +90,7 @@ class CrossValidator:
             return 'multi'
 
     def _create_model(self) -> nn.Module:
-        """Create model based on configuration."""
+        """create model based on configuration."""
         if self.model_type == 'single':
             return FullBandCNN(dropout=self.dropout).to(self.device)
         else:
@@ -102,7 +98,7 @@ class CrossValidator:
             return MultiScaleCNN(n_subbands=n_subbands, dropout=self.dropout).to(self.device)
 
     def _train_epoch(self, model, loader, criterion, optimizer):
-        """Train for one epoch."""
+        """train for one epoch."""
         model.train()
         total_loss, correct, n = 0.0, 0, 0
 
@@ -123,7 +119,7 @@ class CrossValidator:
 
     @torch.no_grad()
     def _eval_epoch(self, model, loader, criterion):
-        """Evaluate for one epoch."""
+        """evaluate for one epoch."""
         model.eval()
         total_loss, correct, n = 0.0, 0, 0
         all_probs, all_labels = [], []
@@ -171,7 +167,7 @@ class CrossValidator:
 
     @torch.no_grad()
     def _get_attention_weights(self, model, loader):
-        """Extract attention weights for multi-scale models."""
+        """extract attention weights for multi-scale models."""
         if self.model_type == 'single':
             return None
 
@@ -188,7 +184,7 @@ class CrossValidator:
 
     def run(self) -> Dict:
         """
-        Run complete cross-validation training.
+        run complete cross-validation training.
 
         Returns:
             Dictionary with aggregated results across folds
@@ -198,9 +194,7 @@ class CrossValidator:
             subbands = self.subband_keys if self.subband_keys else ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
             print(f"Subbands: {subbands}")
             print(f"Denoise: {self.denoise}")
-        print(f"Output: {self.output_dir}")
 
-        # Load dataset
         dataset_mode = self._get_dataset_mode()
         dataset = FullDataset(
             self.h5_dir,
@@ -209,14 +203,11 @@ class CrossValidator:
             subband_keys=self.subband_keys
         )
 
-        # Get patient groups for stratified splitting
         groups = np.array([get_subject_group(r) for r in dataset.record_ids])
 
-        # Initialize fold splitting
         gkf = GroupKFold(n_splits=self.n_folds)
         dummy_X = np.zeros(len(dataset))
 
-        # Storage for results
         fold_results = []
         fold_probs = []
         fold_labels = []
@@ -225,7 +216,6 @@ class CrossValidator:
         for fold, (tr_idx, va_idx) in enumerate(gkf.split(dummy_X, dataset.labels, groups), start=1):
             print(f"Fold {fold}/{self.n_folds}")
 
-            # Compute class weights based on unique subjects (individuals)
             tr_groups = groups[tr_idx]
             unique_tr_groups = np.unique(tr_groups)
             n_tr_nsr_subjects = int((unique_tr_groups >= 200).sum())  # NSR groups are >= 200
@@ -233,7 +223,6 @@ class CrossValidator:
             w_preaf = n_tr_nsr_subjects / n_tr_paf_subjects if n_tr_paf_subjects > 0 else 1.0
             class_weights = torch.tensor([1.0, w_preaf], dtype=torch.float32).to(self.device)
 
-            # Create data_container loaders
             tr_subset = AugmentedSubset(dataset, tr_idx, augment=True)
             va_subset = Subset(dataset, va_idx)
 
@@ -312,10 +301,10 @@ class CrossValidator:
             fold_labels.append(final_labels)
 
             print(f"\nFold {fold} final results:")
-            print(f"  AUC:         {final_metrics['auc_roc']:.4f}")
-            print(f"  AUPRC:       {final_metrics['auprc']:.4f}")
-            print(f"  Sensitivity: {final_metrics['sensitivity']:.4f}")
-            print(f"  Specificity: {final_metrics['specificity']:.4f}")
+            print(f"AUC: {final_metrics['auc_roc']:.4f}")
+            print(f"AUPRC: {final_metrics['auprc']:.4f}")
+            print(f"Sensitivity: {final_metrics['sensitivity']:.4f}")
+            print(f"Specificity: {final_metrics['specificity']:.4f}")
 
         # Aggregate results
         def aggregate(fold_results):
@@ -359,7 +348,5 @@ class CrossValidator:
 
         with open(self.output_dir / 'results.json', 'w') as f:
             json.dump(results, f, indent=2)
-
-        print(f"Results saved to {self.output_dir / 'results.json'}")
 
         return results

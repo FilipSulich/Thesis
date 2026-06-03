@@ -8,7 +8,7 @@ class AMI:
 
     def __init__(self, signal, max_lag=100):
         """
-        initializes AMI calculator with signal and maximum lag to test
+        initializes AMI class with signal and maximum lag to test
 
         Args:
             signal (np.ndarray): input time series signal

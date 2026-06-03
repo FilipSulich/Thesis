@@ -1,7 +1,3 @@
-"""
-Plotting utilities for model evaluation and visualization.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
@@ -19,16 +15,16 @@ DEFAULT_COLORS = {
 
 def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'):
     """
-    Plot roc curves for multiple models.
+    plots ROC curves for multiple models with mean and standard deviation across folds
 
-    args:
-        data_dict: dict mapping model names to list of fold results each fold result should have 'probs' and 'labels'
-        colors: dict mapping model names to colors
-        output_path: path to save figure (optional)
-        title: plot title
+    Args:
+        data_dict (dict): mapping of model names to list of fold results, each with 'probs' and 'labels'
+        colors (dict): mapping of model names to color codes
+        output_path (Path): path to save figure
+        title (str): plot title
 
-    returns:
-        fig, ax
+    Returns:
+        tuple: (matplotlib figure, matplotlib axes) for the ROC plot
     """
     colors = colors or DEFAULT_COLORS
     mean_fpr = np.linspace(0, 1, 200)
@@ -73,23 +69,22 @@ def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'
 
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.savefig(str(output_path).replace('.png', '.pdf'), bbox_inches='tight')
 
     return fig, ax
 
 
 def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Recall Curves'):
     """
-    Plot Precision-Recall curves for multiple models.
+    plots precision-recall curves for multiple models with mean and standard deviation across folds
 
-    args:
-        data_dict: dict mapping model names to list of fold results
-        colors: dict mapping model names to colors
-        output_path: path to save figure
-        title: plot title
+    Args:
+        data_dict (dict): mapping of model names to list of fold results
+        colors (dict): mapping of model names to color codes
+        output_path (Path): path to save figure
+        title (str): plot title
 
-    returns:
-        fig, ax
+    Returns:
+        tuple: (matplotlib figure, matplotlib axes) for the PR plot
     """
     colors = colors or DEFAULT_COLORS
     mean_recall = np.linspace(0, 1, 200)
@@ -110,7 +105,6 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
         # collect pr curves from all folds
         for fold in fold_results:
             precision, recall, _ = precision_recall_curve(fold['labels'], fold['probs'])
-            # reverse for interpolation (recall must be increasing)
             precision_rev = precision[::-1]
             recall_rev = recall[::-1]
             prec_interp = np.interp(mean_recall, recall_rev, precision_rev)
@@ -148,24 +142,23 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
 
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.savefig(str(output_path).replace('.png', '.pdf'), bbox_inches='tight')
 
     return fig, ax
 
 
 def plot_metric_boxplots(data_dict, metrics=['auc', 'auprc'], colors=None, output_path=None, title='Model Comparison'):
     """
-    Plot boxplots comparing metrics across models.
+    plots boxplots comparing specified metrics across multiple models
 
-    args:
-        data_dict: dict mapping model names to list of fold results
-        metrics: list of metric names to plot
-        colors: dict mapping model names to colors
-        output_path: path to save figure
-        title: plot title
+    Args:
+        data_dict (dict): mapping of model names to list of fold results
+        metrics (list): list of metric names to plot
+        colors (dict): mapping of model names to color codes
+        output_path (Path): path to save figure
+        title (str): overall plot title
 
-    returns:
-        fig, axes
+    Returns:
+        tuple: (matplotlib figure, list of matplotlib axes) for each metric
     """
     colors = colors or DEFAULT_COLORS
     n_metrics = len(metrics)
@@ -207,23 +200,22 @@ def plot_metric_boxplots(data_dict, metrics=['auc', 'auprc'], colors=None, outpu
 
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.savefig(str(output_path).replace('.png', '.pdf'), bbox_inches='tight')
 
     return fig, axes
 
 
 def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='ROC and Precision-Recall Curves'):
     """
-    Plot ROC and PR curves side-by-side.
+    plots ROC and precision-recall curves side-by-side for model comparison
 
-    args:
-        data_dict: dict mapping model names to list of fold results
-        colors: dict mapping model names to colors
-        output_path: path to save figure
-        title: overall title
+    Args:
+        data_dict (dict): mapping of model names to list of fold results
+        colors (dict): mapping of model names to color codes
+        output_path (Path): path to save figure
+        title (str): overall plot title
 
-    returns:
-        fig, (ax1, ax2)
+    Returns:
+        tuple: (matplotlib figure, (ax1, ax2)) where ax1 is ROC plot and ax2 is PR plot
     """
     colors = colors or DEFAULT_COLORS
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
@@ -298,6 +290,5 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
 
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.savefig(str(output_path).replace('.png', '.pdf'), bbox_inches='tight')
 
     return fig, (ax1, ax2)

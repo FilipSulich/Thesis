@@ -1,6 +1,6 @@
 def min_max_normalize(signal):
     """
-    normalize signal to [0, 1] range using min-max scaling transformation
+    normalize signal to [0, 1] range using min-max scaling.
 
     Args:
         signal (numpy.ndarray): input signal array to be normalized

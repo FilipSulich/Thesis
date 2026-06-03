@@ -8,7 +8,7 @@ class FNN:
 
     def __init__(self, signal, tau, max_dim=15, r_tol=15.0, a_tol=2.0):
         """
-        initializes FNN calculator with signal and embedding parameters
+        initializes FNN class with signal and embedding parameters
 
         Args:
             signal (np.ndarray): input time series signal to reconstruct
@@ -62,7 +62,6 @@ class FNN:
             embedded_m1 = self.embed(m + 1)
             n_points_m1 = len(embedded_m1)
 
-            # Truncate m-dimensional embedding to match m+1 size
             embedded_m_trunc = embedded_m[:n_points_m1]
 
             # Find nearest neighbor in m-dimensional space
@@ -77,8 +76,7 @@ class FNN:
             nn_dist_m1 = np.linalg.norm(embedded_m1 - embedded_m1[nn_indices], axis=1)
 
             # Calculate ratio increase (avoid division by zero)
-            ratio = np.divide(np.abs(nn_dist_m1 - nn_dist_m), nn_dist_m,
-                            out=np.zeros_like(nn_dist_m), where=nn_dist_m!=0)
+            ratio = np.divide(np.abs(nn_dist_m1 - nn_dist_m), nn_dist_m, out=np.zeros_like(nn_dist_m), where=nn_dist_m!=0)
 
             # Calculate standard deviation of signal
             Ra = np.std(self.signal)
@@ -99,7 +97,7 @@ class FNN:
 
     def get_optimal_dimension(self, threshold=5.0):
         """
-        returns optimal embedding dimension where FNN percentage first drops below threshold
+        returns optimal embedding dimension where FNN percentage first drops below treshold
 
         Args:
             threshold (float): FNN percentage threshold (default 5.0%)

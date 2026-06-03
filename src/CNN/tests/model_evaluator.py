@@ -34,6 +34,10 @@ SUBBAND_CONFIGS = {
 }
 
 def main():
+    """
+    main function to run the complete model evaluation
+    """
+
     print("loading datasets...")
     dataset_single = CombinedH5Dataset(H5_DIR, mode='single')
     dataset_multi = CombinedH5Dataset(H5_DIR, mode='multi', subband_keys=SUBBAND_CONFIGS['multi'])
@@ -43,21 +47,10 @@ def main():
     results = {}
 
     print("evaluating models...")
-    results['Full-band'] = evaluate_model_folds(model_class=FullBandCNN, model_params={'dropout': 0.5},
-                                                checkpoint_dir=RESULTS_SINGLE, dataset=dataset_single, device=DEVICE,
-                                                batch_size=BATCH_SIZE)
-
-    results['Multi-scale'] = evaluate_model_folds(model_class=MultiScaleCNN,
-                                                  model_params={'n_subbands': 7, 'dropout': 0.5},
-                                                  checkpoint_dir=RESULTS_MULTI, dataset=dataset_multi, device=DEVICE,
-                                                  batch_size=BATCH_SIZE)
-
-
-    results['Multi-scale denoised'] = evaluate_model_folds(model_class=MultiScaleCNN,
-                                                           model_params={'n_subbands': 7, 'dropout': 0.5},
-                                                           checkpoint_dir=RESULTS_MULTI_DENOISED,
-                                                           dataset=dataset_multi_denoised, device=DEVICE,
-                                                           batch_size=BATCH_SIZE)
+    results['Full-band'] = evaluate_model_folds(model_class=FullBandCNN, model_params={'dropout': 0.5}, checkpoint_dir=RESULTS_SINGLE, dataset=dataset_single, device=DEVICE, batch_size=BATCH_SIZE)
+    results['Multi-scale'] = evaluate_model_folds(model_class=MultiScaleCNN,model_params={'n_subbands': 7, 'dropout': 0.5}, checkpoint_dir=RESULTS_MULTI, dataset=dataset_multi, device=DEVICE, batch_size=BATCH_SIZE)
+    results['Multi-scale denoised'] = evaluate_model_folds(model_class=MultiScaleCNN, model_params={'n_subbands': 7, 'dropout': 0.5}, checkpoint_dir=RESULTS_MULTI_DENOISED, dataset=dataset_multi_denoised, device=DEVICE, batch_size=BATCH_SIZE)
+    print("models evaluated")
 
     stats = compare_models(
         results,

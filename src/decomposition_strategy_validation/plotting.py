@@ -27,7 +27,7 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
     Args:
         agg_df (pandas.DataFrame): aggregated results dataframe with columns ['trial', 'pipeline', metric1, metric2, ...]
         metrics (list): list of metric column names to visualize
-        output_dir (str): directory path where plots will be saved as PNG and PDF files
+        output_dir (str): directory path where plots will be saved as PNG
     """
     df = agg_df.copy()
     df['pipeline'] = df['pipeline'].map(PIPELINE_LABELS)
@@ -82,9 +82,6 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
     plot_path = os.path.join(output_dir, 'pipeline_comparison_boxplots.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
 
-    plot_path_pdf = os.path.join(output_dir, 'pipeline_comparison_boxplots.pdf')
-    plt.savefig(plot_path_pdf, bbox_inches='tight')
-
     plt.close()
 
 
@@ -95,7 +92,7 @@ def plot_violinplot_comparisons(agg_df, metrics, output_dir):
     Args:
         agg_df (pandas.DataFrame): aggregated results dataframe with columns ['trial', 'pipeline', metric1, metric2, ...]
         metrics (list): list of metric column names to visualize
-        output_dir (str): directory path where plots will be saved as PNG and PDF files
+        output_dir (str): directory path where plots will be saved as PNG file
     """
 
     df = agg_df.copy()
@@ -159,8 +156,4 @@ def plot_violinplot_comparisons(agg_df, metrics, output_dir):
 
     plot_path = os.path.join(output_dir, 'pipeline_comparison_violinplots.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-
-    plot_path_pdf = os.path.join(output_dir, 'pipeline_comparison_violinplots.pdf')
-    plt.savefig(plot_path_pdf, bbox_inches='tight')
-
     plt.close()

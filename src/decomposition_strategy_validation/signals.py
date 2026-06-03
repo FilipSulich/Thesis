@@ -25,19 +25,18 @@ def generate_composite_sine(n, fs, freq_dict):
     return signal
 
 
-def generate_single_sine(n, fs, freq, random_phase=False):
+def generate_single_sine(n, fs, freq):
     """
-    generate single sinusoid at specified frequency with optional random phase
+    generate single sinusoid at specified frequency with random phase
 
     Args:
         n (int): signal length in samples
         fs (int): sampling frequency in Hz
         freq (float): frequency of the sinusoid in Hz
-        random_phase (bool): if True, use random phase offset, otherwise use zero phase (default: False)
 
     Returns:
         numpy.ndarray: sine wave signal array
     """
     t = np.arange(n) / fs
-    phase = np.random.uniform(0, 2 * np.pi) if random_phase else 0.0
+    phase = np.random.uniform(0, 2 * np.pi)
     return np.sin(2 * np.pi * freq * t + phase)
