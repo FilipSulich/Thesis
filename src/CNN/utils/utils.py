@@ -1,5 +1,5 @@
 """
-shared utility functions for cnn training and evaluation.
+Shared utility functions for CNN training and evaluation.
 """
 
 import re
@@ -20,10 +20,20 @@ DEVICE = get_device()
 
 def get_subject_group(record_id: str) -> int:
     """
-    extract patient group from record id.
+    Extract patient group from record ID for cross-validation.
 
-    ensures paired recordings (p01/p02, p03/p04, n01/n01c) stay together.
+    Grouping strategy:
+    - Pre-AF (p*): Odd-even pairs from same patient
+      p01 & p02 → group 101
+      p03 & p04 → group 102
+      p05 & p06 → group 103, etc.
 
+    - NSR (n*): All variants of same base patient number
+      n01, n01c, n02, n02c → group 201 (all from patient 1)
+      n03, n03c, n04, n04c → group 202 (all from patient 2)
+      n05, n05c, n06, n06c → group 203, etc.
+
+    This prevents data leakage between sets by keeping all recordings from the same patient in the same fold.
     """
     match = re.search(r'(\d+)', record_id)
     if not match:
@@ -31,11 +41,12 @@ def get_subject_group(record_id: str) -> int:
 
     num = int(match.group(1))
 
-    # pre-af patients (p*)
     if record_id.startswith('p'):
         return 100 + (num + 1) // 2
 
-    # nsr patients (n*)
+    elif record_id.startswith('n'):
+        return 200 + (num + 1) // 2
+
     else:
         return num
 
@@ -48,10 +59,3 @@ def set_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
-
-N_FOLDS = 10
-N_SUBBANDS = 7
-SUBBAND_KEYS = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
-BATCH_SIZE = 32
-SEED = 42

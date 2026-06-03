@@ -1,5 +1,5 @@
 """
-model evaluation utilities.
+Model evaluation utilities.
 """
 
 import numpy as np
@@ -17,16 +17,15 @@ from src.wavelet_selection_tests.utils import get_subject_group
 @torch.no_grad()
 def get_predictions(model, loader, device):
     """
-    collect predictions from model.
+    collects predicted probabilities and true labels from a trained model on a dataset
 
-    args:
-        model: trained model
-        loader: dataloader
-        device: torch device
+    Args:
+        model (nn.Module): trained PyTorch model for evaluation
+        loader (DataLoader): dataloader providing batches of data
+        device (torch.device): device to run inference on (cpu or cuda)
 
-    returns:
-        probs: array of predicted probabilities
-        labels: array of true labels
+    Returns:
+        tuple: (np.ndarray, np.ndarray) containing predicted probabilities for positive class and true labels
     """
     model.eval()
     probs, labels = [], []
@@ -44,15 +43,15 @@ def get_predictions(model, loader, device):
 @torch.no_grad()
 def get_attention_weights(model, loader, device):
     """
-    extract attention weights from multi-scale model.
+    extracts and averages attention weights from a multi-scale model across all samples in a dataset
 
-    args:
-        model: trained multi-scale model with get_attention_weights method
-        loader: dataloader
-        device: torch device
+    Args:
+        model (nn.Module): trained multi-scale model with get_attention_weights method
+        loader (DataLoader): dataloader providing batches of data
+        device (torch.device): device to run inference on (cpu or cuda)
 
-    returns:
-        mean attention weights across all samples
+    Returns:
+        np.ndarray: mean attention weights across all samples, or None if model lacks attention mechanism
     """
     if not hasattr(model, 'get_attention_weights'):
         return None
@@ -65,26 +64,21 @@ def get_attention_weights(model, loader, device):
         weights = model.get_attention_weights(x).cpu().numpy()
         all_weights.append(weights)
 
-    # concatenate all batches then average
     all_weights = np.concatenate(all_weights, axis=0)
     return np.mean(all_weights, axis=0)
 
 
-# ============================================================================
-# metrics computation
-# ============================================================================
-
 def compute_metrics(labels, probs, threshold=0.5):
     """
-    compute classification metrics.
+    computes comprehensive classification metrics including AUC, AUPRC, accuracy, F1, sensitivity, and specificity
 
-    args:
-        labels: true labels
-        probs: predicted probabilities
-        threshold: classification threshold
+    Args:
+        labels (np.ndarray): true binary labels
+        probs (np.ndarray): predicted probabilities for positive class
+        threshold (float): classification threshold for converting probabilities to predictions, defaults to 0.5
 
-    returns:
-        dict with all metrics
+    Returns:
+        dict: dictionary containing all computed metrics including auc, auprc, accuracy, f1, sensitivity, specificity, precision, and confusion matrix values
     """
     preds = (probs >= threshold).astype(int)
 
@@ -120,13 +114,14 @@ def compute_metrics(labels, probs, threshold=0.5):
 
 def find_optimal_threshold_youden(labels, probs):
     """
-    find Youden index classification threshold.
+    finds the optimal classification threshold by maximizing Youden's J statistic (sensitivity + specificity - 1)
 
-    args:
-        labels: true labels
-        probs: predicted probabilities
-    returns:
-        optimal threshold at Youden Index
+    Args:
+        labels (np.ndarray): true binary labels
+        probs (np.ndarray): predicted probabilities for positive class
+
+    Returns:
+        float: optimal threshold value that maximizes the Youden index
     """
     fpr, tpr, thresholds = roc_curve(labels, probs)
     j_scores = tpr - fpr
@@ -136,37 +131,53 @@ def find_optimal_threshold_youden(labels, probs):
 
 def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, device, batch_size=32):
     """
-    evaluate model across all folds
+    evaluates a trained model across all cross-validation folds by loading checkpoints and computing metrics
 
-    args:
-        model_class: model class (FullbandCNN or MultiScaleCNN)
-        model_params: dict of model parameters
-        checkpoint_dir: directory containing fold checkpoints
-        dataset: combined dataset
-        device: torch device
-        batch_size: batch size for evaluation
+    Args:
+        model_class (type): model class to instantiate (e.g., FullBandCNN or MultiScaleCNN)
+        model_params (dict): dictionary of model initialization parameters
+        checkpoint_dir (Path): directory containing fold checkpoint files (fold*_best.pt)
+        dataset (Dataset): combined dataset containing all samples
+        device (torch.device): device to run evaluation on (cpu or cuda)
+        batch_size (int): batch size for evaluation dataloaders, defaults to 32
 
-    returns:
-        list of fold results
+    Returns:
+        list: list of dictionaries containing metrics, predictions, and metadata for each fold
     """
-    np.random.seed(42)
-
-    groups = np.array([get_subject_group(r) for r in dataset.record_ids])
-    gkf = GroupKFold(n_splits=10)
-    dummy_X = np.zeros(len(dataset))
-    fold_splits = list(gkf.split(dummy_X, dataset.labels, groups))
+    from pathlib import Path
+    checkpoint_dir = Path(checkpoint_dir)
 
     fold_results = []
 
-    for fold_idx, (_, va_idx) in enumerate(fold_splits):
-        checkpoint_path = checkpoint_dir / f'fold{fold_idx}_best.pt'
-        if not checkpoint_path.exists():
-            checkpoint_path = checkpoint_dir / f'fold_{fold_idx + 1}_best.pt'
+    checkpoint_files = sorted(checkpoint_dir.glob('fold*_best.pt'))
 
-        if not checkpoint_path.exists():
-            continue
-
+    for checkpoint_path in checkpoint_files:
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+        fold_idx = checkpoint.get('fold', None)
+        if fold_idx is None:
+            import re
+            match = re.search(r'fold(\d+)', checkpoint_path.name)
+            if match:
+                fold_idx = int(match.group(1))
+            else:
+                continue
+
+        print(f"\nEvaluating Fold {fold_idx} ({checkpoint_path.name})...")
+
+        if 'val_indices' in checkpoint:
+            va_idx = checkpoint['val_indices']
+        else:
+            groups = np.array([get_subject_group(r) for r in dataset.record_ids])
+            gkf = GroupKFold(n_splits=10)
+            dummy_X = np.zeros(len(dataset))
+            fold_splits = list(gkf.split(dummy_X, dataset.labels, groups))
+
+            if fold_idx < len(fold_splits):
+                _, va_idx = fold_splits[fold_idx]
+            else:
+                continue
+
         model = model_class(**model_params).to(device)
 
         if 'model_state_dict' in checkpoint:
@@ -180,7 +191,6 @@ def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, dev
         model.eval()
 
         va_loader = DataLoader(Subset(dataset, va_idx), batch_size=batch_size, shuffle=False)
-
         probs, labels = get_predictions(model, va_loader, device)
 
         metrics = compute_metrics(labels, probs)
@@ -188,46 +198,10 @@ def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, dev
         metrics['probs'] = probs
         metrics['labels'] = labels
 
+        if 'val_record_ids' in checkpoint:
+            metrics['val_record_ids'] = checkpoint['val_record_ids']
+
+        print(f"AUC: {metrics['auc']:.4f}, AUPRC: {metrics['auprc']:.4f} Sensitivity: {metrics['sensitivity']:.4f}, Specificity: {metrics['specificity']:.4f}")
         fold_results.append(metrics)
 
     return fold_results
-#
-# def aggregate_fold_results(fold_results, metrics=['auc', 'auprc', 'sensitivity', 'specificity']):
-#     """
-#     aggregate metrics across folds.
-#
-#     args:
-#         fold_results: list of fold result dicts
-#         metrics: list of metric names to aggregate
-#
-#     returns:
-#         dict with mean, std, and per-fold values for each metric
-#     """
-#     aggregated = {}
-#
-#     for metric in metrics:
-#         values = [fold[metric] for fold in fold_results]
-#         aggregated[metric] = {
-#             'mean': float(np.mean(values)),
-#             'std': float(np.std(values)),
-#             'values': values
-#         }
-#
-#     return aggregated
-
-#
-# def print_aggregated_results(aggregated, model_name):
-#     """
-#     print aggregated results in a formatted table.
-#
-#     args:
-#         aggregated: dict from aggregate_fold_results
-#         model_name: name of model
-#     """
-#     print(f"\n{model_name} - aggregated results:")
-#     print("=" * 60)
-#     print(f"{'metric':<15s} {'mean':>10s} {'std':>10s}")
-#     print("-" * 60)
-#
-#     for metric, stats in aggregated.items():
-#         print(f"{metric:<15s} {stats['mean']:>10.4f} {stats['std']:>10.4f}")

@@ -7,7 +7,20 @@ from src.wavelets.stationary_wavelet_transform import SWT
 import numpy as np
 
 class Pipeline:
+    """wrapper for different wavelet decomposition strategies used in the leakage experiments"""
+
     def __init__(self, pipeline_name, level, wavelet):
+        """
+        initializes pipeline with wavelet decomposition configuration
+
+        Args:
+            pipeline_name (str): name identifier for the pipeline
+            level (int): decomposition level for wavelet transform
+            wavelet (str): wavelet function name (e.g., 'db8')
+
+        Returns:
+            None
+        """
         self.pipeline_name = pipeline_name
         self.level = level
         self.wavelet = wavelet
@@ -16,6 +29,15 @@ class Pipeline:
         self.dwt = DWT(wavelet=wavelet, level=level)
 
     def pipeline_swt_recon(self, signal):
+        """
+        performs SWT decomposition and reconstructs each subband separately in time domain
+
+        Args:
+            signal (np.ndarray): input time series signal
+
+        Returns:
+            dict: dictionary mapping subband names (D1-D4, A4) to reconstructed signals
+        """
         coeffs = self.swt.decompose(signal, level=self.level)
 
         subbands = {}
@@ -38,6 +60,15 @@ class Pipeline:
         return subbands
 
     def pipeline_swt_direct(self, signal):
+        """
+        extracts wavelet coefficients directly from SWT without reconstruction
+
+        Args:
+            signal (np.ndarray): input time series signal
+
+        Returns:
+            dict: dictionary mapping subband names (D1-D4, A4) to coefficient arrays
+        """
         coeffs = self.swt.decompose(signal, level=self.level)
 
         subbands = {}
@@ -50,7 +81,16 @@ class Pipeline:
 
         return subbands
 
-    def pipeline_dwt_recon(self,signal):
+    def pipeline_dwt_recon(self, signal):
+        """
+        performs DWT decomposition and reconstructs each subband separately in time domain
+
+        Args:
+            signal (np.ndarray): input time series signal
+
+        Returns:
+            dict: dictionary mapping subband names (D1-D4, A4) to reconstructed signals
+        """
         coeffs = self.dwt.decompose(signal, level=self.level)
 
         subbands = {}
@@ -70,18 +110,15 @@ class Pipeline:
 
         return subbands
 
-    def pipeline_dwt_direct(self, signal):
-        coeffs = self.dwt.decompose(signal, level=self.level)
-
-        subbands = {}
-
-        for i, band in enumerate(['D1', 'D2', 'D3', 'D4']):
-            detail_idx = len(coeffs) - 1 - i
-            subbands[band] = coeffs[detail_idx]
-
-        subbands['A4'] = coeffs[0]
-
-        return subbands
 
     def pipeline_single(self, signal):
+        """
+        returns signal without decomposition for single-scale baseline comparison
+
+        Args:
+            signal (np.ndarray): input time series signal
+
+        Returns:
+            np.ndarray: unmodified input signal
+        """
         return np.ndarray(signal)

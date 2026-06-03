@@ -1,27 +1,16 @@
-"""
-cnn module for pre-af detection using recurrence plot analysis.
-"""
-
 from src.CNN.utils.utils import (
     get_device,
     get_subject_group,
     set_seed,
     DEVICE,
-    N_FOLDS,
-    N_SUBBANDS,
-    SUBBAND_KEYS,
-    BATCH_SIZE,
-    SEED
 )
 
 from src.CNN.utils.datasets import (
     CombinedH5Dataset
 )
 
-from src.CNN.models.models import (
-    FullBandCNN,
-    MultiScaleCNN
-)
+from src.CNN.models.full_band_cnn import FullBandCNN
+from src.CNN.models.multi_scale_cnn import MultiScaleCNN
 
 from src.CNN.utils.evaluation import (
     get_predictions,
@@ -55,11 +44,6 @@ __all__ = [
     'get_subject_group',
     'set_seed',
     'DEVICE',
-    'N_FOLDS',
-    'N_SUBBANDS',
-    'SUBBAND_KEYS',
-    'BATCH_SIZE',
-    'SEED',
     # datasets
     'CombinedH5Dataset',
     # models

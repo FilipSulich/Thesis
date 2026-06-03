@@ -8,20 +8,33 @@ SUBBAND_KEYS = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
 
 class FullDataset(Dataset):
     """
-    Combines train + val HDF5 files into one pool for patient-level 10-fold CV.
+    combines data from different sets (training, validation and test) into one pool for patient-level 10-fold CV
     """
-    def __init__(self, h5_dir: Path, mode: str = 'multi_denoise', cache: bool = True):
+
+    def __init__(self, h5_dir: Path, mode: str = 'multi_denoise', cache: bool = True, subband_keys=None):
+        """
+        initializes the combined dataset by loading all splits and creating a unified sample mapping
+
+        Args:
+            h5_dir (Path): directory containing train.h5, val.h5, and test.h5 files
+            mode (str): loading mode, either 'multi', 'multi_denoise', or 'single', defaults to 'multi_denoise'
+            cache (bool): unused parameter kept for backward compatibility, defaults to True
+            subband_keys (list): list of subband keys to load for multi modes, defaults to None which uses all D2-D8
+        """
         self.mode = mode
         self.h5_dir = Path(h5_dir)
 
         all_labels, all_rids, all_maps = [], [], []
         self.split_datasets = {}
 
-        for split in ('train', 'val'):
+        if subband_keys is None and mode in ('multi', 'multi_denoise'):
+            subband_keys = SUBBAND_KEYS
+
+        for split in ('train', 'val', 'test'):
             ds = H5Dataset(
                 h5_path=h5_dir / f'{split}.h5',
                 mode=mode,
-                subband_keys=SUBBAND_KEYS if mode == 'multi' else None
+                subband_keys=subband_keys if mode in ('multi', 'multi_denoise') else None
             )
             self.split_datasets[split] = ds
             all_labels.extend(ds.labels.tolist())
@@ -34,25 +47,64 @@ class FullDataset(Dataset):
         self.sample_map = all_maps
 
     def __len__(self):
+        """
+        returns the total number of samples across all splits
+
+        Returns:
+            int: total number of samples in the combined dataset
+        """
         return len(self.labels)
 
     def __getitem__(self, idx: int):
+        """
+        retrieves a sample from the appropriate split dataset using the unified index
+
+        Args:
+            idx (int): global index across all splits
+
+        Returns:
+            tuple: (image_tensor, label) where image_tensor is the URP data and label is the classification target
+        """
         split, local_idx = self.sample_map[idx]
         return self.split_datasets[split][local_idx]
 
 
 class AugmentedSubset(Dataset):
-    """Wrapper that applies data augmentation to a subset of data"""
-
+    """
+    wrapper that applies data augmentation to a subset of URPs for training set augmentation
+    """
     def __init__(self, dataset, indices, augment: bool = False):
+        """
+        initializes the augmented subset wrapper around a base dataset
+
+        Args:
+            dataset (Dataset): base dataset to wrap
+            indices (list): list of indices to include in this subset
+            augment (bool): whether to apply horizontal flip augmentation, defaults to False
+        """
         self.dataset = dataset
         self.indices = indices
         self.augment = augment
 
     def __len__(self):
+        """
+        returns the number of samples in this subset
+
+        Returns:
+            int: number of indices in the subset
+        """
         return len(self.indices)
 
     def __getitem__(self, idx):
+        """
+        retrieves a sample from the base dataset with optional horizontal flip augmentation
+
+        Args:
+            idx (int): index within the subset
+
+        Returns:
+            tuple: (image_tensor, label) with augmentation applied if enabled
+        """
         x, y = self.dataset[self.indices[idx]]
 
         if self.augment and torch.rand(1).item() < 0.5:
