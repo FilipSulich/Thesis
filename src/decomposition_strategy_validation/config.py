@@ -1,29 +1,36 @@
-"""shared configuration and constants for decomposition strategy selection."""
-
 from dataclasses import dataclass
 from typing import Dict
 
 
 @dataclass
 class ExperimentConfig:
-    """configuration for decomposition experiments."""
+    """
+    configuration dataclass for wavelet decomposition validation experiments
+
+    Attributes:
+        fs (int): sampling frequency in Hz (default: 128)
+        n (int): signal length in samples (default: 1280)
+        level (int): wavelet decomposition level (default: 4)
+        wavelet (str): wavelet type identifier (default: 'db4')
+        subband_freqs (dict): mapping of subband names to their center frequencies in Hz
+        output_dir (str): directory path for saving results and outputs
+    """
 
     # signal parameters
-    fs: int = 128           # sampling frequency (Hz)
-    n: int = 1024           # signal length (samples)
+    fs: int = 128           # sampling frq
+    n: int = 1280           # signal length
 
     # wavelet parameters
     level: int = 4          # decomposition level
     wavelet: str = 'db4'    # wavelet type
 
-    # subband frequencies (Hz)
+    # subband frequencies
     subband_freqs: Dict[str, float] = None
 
     # output directory
     output_dir: str = None
 
     def __post_init__(self):
-        # default subband frequencies if not provided
         if self.subband_freqs is None:
             self.subband_freqs = {
                 'A4': 2,
@@ -39,12 +46,22 @@ class ExperimentConfig:
 
     @property
     def band_names(self):
-        """ordered list of band names."""
+        """
+        get ordered list of wavelet decomposition subband names from highest to lowest frequency
+
+        Returns:
+            list: list of subband names ['D1', 'D2', 'D3', 'D4', 'A4']
+        """
         return ['D1', 'D2', 'D3', 'D4', 'A4']
 
     @property
     def pipelines(self):
-        """list of pipeline names."""
+        """
+        get list of available wavelet decomposition pipeline names for comparison
+
+        Returns:
+            list: list of pipeline identifiers ['swt_recon', 'swt_direct', 'dwt_recon']
+        """
         return ['swt_recon', 'swt_direct', 'dwt_recon']
 
 

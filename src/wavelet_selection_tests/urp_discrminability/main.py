@@ -11,10 +11,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.wavelet_selection_tests.urp_discrminability.wavelet_evaluator import WaveletEvaluator
 
-DATA_DIR = PROJECT_ROOT / 'data' / 'data_old' / 'paf'
-SPLIT_JSON = PROJECT_ROOT / 'data' / 'processed_data' / 'utrp_dataset_db8' / 'split.json'
-PARAMS_JSON = PROJECT_ROOT / 'data' / 'data_old' / 'data_new' / 'tau_m_params.json'
-RESULTS_DIR = PROJECT_ROOT / 'data' / 'results_final' / 'results' / 'wavelet_selection_utrp_final_2'
+DATA_DIR = PROJECT_ROOT / 'data_container' / 'raw_data' / 'paf'
+SPLIT_JSON = PROJECT_ROOT / 'data_container' / 'processed_data' / 'urp_no_denoise' / 'split.json'
+PARAMS_JSON = PROJECT_ROOT / 'data_container' / 'raw_data' / 'tau_m_params.json'
+RESULTS_DIR = PROJECT_ROOT / 'data_container' / 'data' / 'results' / 'urp_discrminability'
 
 # Config
 FS_ORIG = 128
@@ -42,14 +42,18 @@ def load_ecg_segments():
     nsr_recs = [r for r in combined_records if r.startswith('n')]
 
     def extract_segments(record_id, label):
-        """Extract segments from one record."""
+        """Extract segments from one record.
+        Args:
+            record_id (str): record ID
+            label (str): label
+        """
         try:
             rec = wfdb.rdrecord(str(DATA_DIR / record_id))
             raw = rec.p_signal[:, 0].astype(np.float64)
 
             # Resample to target fs
             n = int(len(raw) * FS_TARGET / FS_ORIG)
-            sig = resample(raw, n).astype(np.float32)
+            sig = resample(raw, n).astype(np.float64)
 
             # Get evenly-spaced segments
             max_start = len(sig) - SEGMENT_SAMPLES
@@ -69,10 +73,8 @@ def load_ecg_segments():
             return segs, labs, rec_ids
 
         except Exception as e:
-            print(f"  Skip {record_id}: {e}")
             return [], [], []
 
-    # Extract all segments
     signals, labels, record_ids = [], [], []
 
     for rid in preaf_recs:
@@ -97,7 +99,6 @@ def load_embedding_params():
 
     embedding_params = {}
 
-    # Handle different JSON formats
     if 'subband_tau' in raw_params and 'subband_m' in raw_params:
         for k in SUBBAND_NAMES:
             if k in raw_params['subband_tau'] and k in raw_params['subband_m']:
@@ -127,7 +128,6 @@ def main():
     df = evaluator.run_all()
     evaluator.save_results()
 
-    # perform statistical tests
     stats = evaluator.perform_statistical_tests(alpha=0.05)
     evaluator.save_statistical_tests(stats)
 

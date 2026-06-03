@@ -7,7 +7,6 @@ from tqdm import tqdm
 
 from .signal_generator import SignalGenerator
 
-# Test frequencies
 HARM_FREQS = {
     'A4': 2,
     'D4': 6,
@@ -26,15 +25,18 @@ NON_HARM_FREQS = {
 
 BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
 
-
 class LeakageTester:
+    """tests wavelets for frequency leakage across subbands using synthetic signals"""
+
     def __init__(self, fs=128, n_samples=1280, level=4, output_dir=None):
         """
+        initializes leakage tester with signal and decomposition parameters
+
         Args:
-            fs: Sampling rate
-            n_samples: Signal length
-            level: Decomposition level
-            output_dir: Where to save results
+            fs (int): sampling frequency in Hz
+            n_samples (int): number of samples per test signal
+            level (int): decomposition level for wavelet transform
+            output_dir (str): directory to save results (JSON + CSV)
         """
         self.fs = fs
         self.level = level
@@ -45,11 +47,14 @@ class LeakageTester:
 
     def compute_confusion_matrix(self, wavelet, freq_map):
         """
-        Build confusion matrix showing energy distribution.
+        builds confusion matrix showing how energy leaks across frequency subbands
 
-        Rows = source band (where freq should go)
-        Cols = target band (where energy actually went)
-        Diagonal = good (energy in right place)
+        Args:
+            wavelet (str): wavelet function name (e.g., 'db8')
+            freq_map (dict): mapping of band names to test frequencies
+
+        Returns:
+            np.array: confusion matrix where rows=source band, cols=target band, diagonal=correct isolation
         """
         from src.pipelines.pipeline_wavelets import Pipeline
 
@@ -68,11 +73,7 @@ class LeakageTester:
             # Generate pure sine
             signal = self.sig_gen.pure_sine(source_freq, jitter=0.05)
 
-            # Decompose
-            try:
-                outputs = pipeline.pipeline_swt_recon(signal)
-            except Exception:
-                continue
+            outputs = pipeline.pipeline_swt_recon(signal)
 
             # Measure energy in each band
             total_energy = sum(
@@ -81,7 +82,6 @@ class LeakageTester:
                 if band in outputs
             )
 
-            # Fill confusion row
             for j, target_band in enumerate(BAND_NAMES):
                 if target_band in outputs:
                     band_energy = np.sum(outputs[target_band] ** 2)
@@ -94,14 +94,31 @@ class LeakageTester:
 
     def compute_energy_ratio(self, confusion):
         """
-        Energy Ratio - how much energy stays in right band.
-        Higher = better (max ~1.0 with 5 bands).
+        computes diagonal energy ratio showing frequency isolation quality
+
+        Args:
+            confusion (np.array): confusion matrix from compute_confusion_matrix
+
+        Returns:
+            float: mean diagonal energy ratio (higher = better isolation)
         """
         diagonal = np.diag(confusion)
         return float(np.mean(diagonal))
 
     def test_wavelet(self, wavelet, freq_map, condition_name, trial_num):
-        """Run one test trial for a wavelet."""
+        """
+        runs single test trial for one wavelet with specified frequency mapping
+
+        Args:
+            wavelet (str): wavelet function name
+            freq_map (dict): mapping of band names to test frequencies
+            condition_name (str): condition identifier (e.g., 'Harmonic' or 'Non-harmonic')
+            trial_num (int): trial number for tracking
+
+        Returns:
+            dict: test results containing wavelet, condition, trial, DER, and confusion matrix
+        """
+
         confusion = self.compute_confusion_matrix(wavelet, freq_map)
         der = self.compute_energy_ratio(confusion)
 
@@ -114,6 +131,16 @@ class LeakageTester:
         }
 
     def run_all(self, wavelets, n_trials=20):
+        """
+        runs complete leakage analysis across all wavelets and conditions
+
+        Args:
+            wavelets (list): list of wavelet function names to test
+            n_trials (int): number of trials per wavelet-condition pair
+
+        Returns:
+            pd.DataFrame: results dataframe with columns [wavelet, condition, trial, DER]
+        """
         all_results = []
 
         for trial_num in range(n_trials):
@@ -133,7 +160,6 @@ class LeakageTester:
                 )
                 all_results.append(result_nonharm)
 
-        # Create results DataFrame
         df = pd.DataFrame([
             {
                 'wavelet': r['wavelet'],

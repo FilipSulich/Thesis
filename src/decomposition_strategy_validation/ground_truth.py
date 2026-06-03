@@ -4,10 +4,10 @@ import os
 import json
 import numpy as np
 
-from src.decomposition_strategy_selection.signals import generate_single_sine
-from src.decomposition_strategy_selection.normalization import min_max_normalize
-from src.decomposition_strategy_selection.embedding import estimate_embedding_params
-from src.decomposition_strategy_selection.recurrence import (
+from src.decomposition_strategy_validation.signals import generate_single_sine
+from src.decomposition_strategy_validation.normalization import min_max_normalize
+from src.decomposition_strategy_validation.embedding import estimate_embedding_params
+from src.decomposition_strategy_validation.recurrence import (
     compute_distance_matrix,
     compute_rqa_metrics,
     extract_rp_array,
@@ -16,32 +16,19 @@ from src.decomposition_strategy_selection.recurrence import (
 
 def generate_ground_truth(config, band_names):
     """
-    generate reference RPs from pure single-frequency sines.
+    generate reference recurrence plots and RQA metrics from pure single-frequency sinusoidal signals for each subband
 
-    for each subband:
-      1. generate single sine at subband frequency
-      2. min-max normalise
-      3. estimate tau and m (AMI / FNN)
-      4. compute epsilon = 10% of max distance
-      5. compute binary RP and RQA metrics
+    Args:
+        config (ExperimentConfig): experiment configuration instance containing sampling frequency, signal length, subband frequencies, and output directory
+        band_names (list): list of wavelet subband names to generate ground truth for (e.g., ['D1', 'D2', 'D3', 'D4', 'A4'])
 
-    args:
-        config: ExperimentConfig instance with fs, n, subband_freqs, output_dir
-        band_names: list of band names (e.g., ['D1', 'D2', 'D3', 'D4', 'A4'])
-
-    returns:
-        tuple of (ground_truth, ground_truth_data):
-            - ground_truth: dict with metrics for each band
-            - ground_truth_data: dict with rp_matrix, distance_matrix, pure_sine
+    Returns:
+        tuple: tuple containing (ground_truth, ground_truth_data) where ground_truth is a dict with RQA metrics for each band and ground_truth_data is a dict with matrices and signals
     """
-    print("generating ground truth...")
     ground_truth = {}
     ground_truth_data = {}
-
     for band in band_names:
         freq = config.subband_freqs[band]
-        print(f"  {band} ({freq} Hz) …")
-
         # generate and normalize pure sine
         pure_sine = generate_single_sine(config.n, config.fs, freq)
         pure_sine = min_max_normalize(pure_sine)
@@ -57,7 +44,6 @@ def generate_ground_truth(config, band_names):
         # compute RQA metrics
         metrics = compute_rqa_metrics(pure_sine, tau, m, epsilon, config.output_dir)
 
-        # store metadata
         ground_truth[band] = {
             'freq_hz': freq,
             'tau': int(tau),
@@ -66,13 +52,8 @@ def generate_ground_truth(config, band_names):
             'DET': float(metrics['DET']),
             'LAM': float(metrics['LAM']),
             'TT': float(metrics['TT']),
-            'ENTR': float(metrics['ENTR']),
-            'L_mean_diagonal': float(metrics['L_mean_diagonal']),
-            'L_longest_diagonal': float(metrics['L_longest_diagonal']),
-            'L_longest_vertical': float(metrics['L_longest_vertical']),
         }
 
-        # store raw data
         ground_truth_data[band] = {
             'rp_matrix': metrics['rp_matrix'],
             'distance_matrix': dist_mat,
@@ -84,15 +65,14 @@ def generate_ground_truth(config, band_names):
 
 def save_ground_truth(ground_truth, ground_truth_data, band_names, save_path):
     """
-    save ground truth to JSON and NPZ files.
+    save ground truth metrics and data to JSON and NPZ files for later reuse
 
-    args:
-        ground_truth: dict with metrics for each band
-        ground_truth_data: dict with rp_matrix, distance_matrix, pure_sine
-        band_names: list of band names
-        save_path: path to save JSON file (NPZ will have _data.npz suffix)
+    Args:
+        ground_truth (dict): dictionary containing RQA metrics and parameters for each band
+        ground_truth_data (dict): dictionary containing recurrence plot matrices, distance matrices, and pure sine signals
+        band_names (list): list of wavelet subband names
+        save_path (str): file path for saving JSON file (NPZ file will use same path with _data.npz suffix)
     """
-    # save JSON metadata
     with open(save_path, 'w') as f:
         json.dump(ground_truth, f, indent=2)
 
@@ -109,24 +89,22 @@ def save_ground_truth(ground_truth, ground_truth_data, band_names, save_path):
 
 def load_ground_truth(band_names, json_path, npz_path=None):
     """
-    load previously saved ground truth.
+    load previously saved ground truth metrics and data from JSON and NPZ files
 
-    args:
-        band_names: list of band names
-        json_path: path to ground truth JSON file
-        npz_path: optional path to NPZ file (default: json_path with _data.npz)
+    Args:
+        band_names (list): list of wavelet subband names to load
+        json_path (str): file path to ground truth JSON file containing metrics
+        npz_path (str): optional file path to NPZ file containing matrices and signals (default: inferred from json_path)
 
-    returns:
-        tuple of (ground_truth, ground_truth_data)
+    Returns:
+        tuple: tuple containing (ground_truth, ground_truth_data) dictionaries
     """
     if npz_path is None:
         npz_path = json_path.replace('.json', '_data.npz')
 
-    # load JSON metadata
     with open(json_path) as f:
         ground_truth = json.load(f)
 
-    # load NPZ raw data
     data = np.load(npz_path, allow_pickle=True)
     ground_truth_data = {}
     for band in band_names:
@@ -141,20 +119,19 @@ def load_ground_truth(band_names, json_path, npz_path=None):
 
 def get_or_generate_ground_truth(config, band_names, force_regenerate=False):
     """
-    load existing ground truth or generate new one if not found.
+    load existing ground truth from files or generate new ground truth if files not found or regeneration is forced
 
-    args:
-        config: ExperimentConfig instance
-        band_names: list of band names
-        force_regenerate: if True, always generate new ground truth
+    Args:
+        config (ExperimentConfig): experiment configuration instance containing output directory and parameters
+        band_names (list): list of wavelet subband names
+        force_regenerate (bool): if True, always generate new ground truth regardless of existing files (default: False)
 
-    returns:
-        tuple of (ground_truth, ground_truth_data)
+    Returns:
+        tuple: tuple containing (ground_truth, ground_truth_data) dictionaries
     """
     gt_path = os.path.join(config.output_dir, 'ground_truth.json')
 
     if not force_regenerate and os.path.exists(gt_path):
-        print(f"loading existing ground truth from {gt_path}")
         return load_ground_truth(band_names, gt_path)
     else:
         ground_truth, ground_truth_data = generate_ground_truth(config, band_names)

@@ -1,7 +1,7 @@
 """decomposition strategy selection package."""
 
 # config
-from src.decomposition_strategy_selection.config import (
+from src.decomposition_strategy_validation.config import (
     ExperimentConfig,
     PIPELINE_LABELS,
     PIPELINE_COLORS,
@@ -9,38 +9,38 @@ from src.decomposition_strategy_selection.config import (
 )
 
 # signals
-from src.decomposition_strategy_selection.signals import (
+from src.decomposition_strategy_validation.signals import (
     generate_composite_sine,
     generate_single_sine,
 )
 
 # normalization
-from src.decomposition_strategy_selection.normalization import min_max_normalize
+from src.decomposition_strategy_validation.normalization import min_max_normalize
 
 # embedding
-from src.decomposition_strategy_selection.embedding import (
+from src.decomposition_strategy_validation.embedding import (
     estimate_tau,
     estimate_embedding_dim,
     estimate_embedding_params,
 )
 
 # recurrence
-from src.decomposition_strategy_selection.recurrence import (
+from src.decomposition_strategy_validation.recurrence import (
     compute_distance_matrix,
     compute_rqa_metrics,
     extract_rp_array,
 )
 
 # metrics
-from src.decomposition_strategy_selection.metrics import (
+from src.decomposition_strategy_validation.metrics import (
     pad_matrix,
     hamming_distance,
-    pattern_correlation,
+    pearson_correlation,
     compute_structural_metrics,
 )
 
 # ground truth
-from src.decomposition_strategy_selection.ground_truth import (
+from src.decomposition_strategy_validation.ground_truth import (
     generate_ground_truth,
     save_ground_truth,
     load_ground_truth,
@@ -48,14 +48,14 @@ from src.decomposition_strategy_selection.ground_truth import (
 )
 
 # pipeline analyzer
-from src.decomposition_strategy_selection.pipeline_analyzer import (
+from src.decomposition_strategy_validation.pipeline_analyzer import (
     decompose_signal,
     analyze_pipeline,
-    analyze_all_pipelines,
+    # analyze_all_pipelines,
 )
 
 # statistical tests
-from src.decomposition_strategy_selection.statistical_tests import (
+from src.decomposition_strategy_validation.statistical_tests import (
     get_significance_notation,
     run_kruskal_wallis,
     run_dunn_posthoc,
@@ -64,13 +64,13 @@ from src.decomposition_strategy_selection.statistical_tests import (
 )
 
 # plotting
-from src.decomposition_strategy_selection.plotting import (
+from src.decomposition_strategy_validation.plotting import (
     plot_boxplot_comparisons,
     plot_violinplot_comparisons,
 )
 
 # experiment
-from src.decomposition_strategy_selection.experiment import (
+from src.decomposition_strategy_validation.experiment import (
     run_trials,
     run_experiment,
 )
@@ -97,7 +97,7 @@ __all__ = [
     # metrics
     'pad_matrix',
     'hamming_distance',
-    'pattern_correlation',
+    'pearson_correlation',
     'compute_structural_metrics',
     # ground truth
     'generate_ground_truth',
@@ -107,7 +107,7 @@ __all__ = [
     # pipeline analyzer
     'decompose_signal',
     'analyze_pipeline',
-    'analyze_all_pipelines',
+    # 'analyze_all_pipelines',
     # statistical tests
     'get_significance_notation',
     'run_kruskal_wallis',

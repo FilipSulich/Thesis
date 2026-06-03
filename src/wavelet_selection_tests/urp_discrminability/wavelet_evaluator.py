@@ -17,7 +17,7 @@ from scipy.stats import friedmanchisquare, wilcoxon
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from src.wavelet_selection_tests.urp_discrminability.utrp_features import URPFeatures
-from src.wavelet_selection_tests.utils import get_subject_group, minmax_normalize
+from src.wavelet_selection_tests.utils import get_subject_group
 
 CANDIDATE_WAVELETS = (
     [f'db{i}' for i in range(2, 9)] +
@@ -29,18 +29,23 @@ N_SWT_LEVELS = 10
 FS = 500
 
 class WaveletEvaluator:
-    """Determines the appriopiate wavelet for urp generation."""
+    """evaluates wavelets for URP discriminability using logistic regression on texture features"""
 
     def __init__(self, signals, labels, record_ids, embedding_params, urp_size=256, n_cv_splits=5, results_dir=None):
         """
+        initializes wavelet evaluator with ECG data and embedding parameters
+
         Args:
-            signals: ECG segments (N, samples)
-            labels: Binary labels (N,)
-            record_ids: Record IDs for grouping (N,)
-            embedding_params: Dict with tau/m per subband
-            urp_size: urp image size
-            n_cv_splits: Number of CV folds
-            results_dir: Where to save results
+            signals (np.array): ECG segments array of shape (N, signal_length)
+            labels (np.array): binary labels (0=NSR, 1=Pre-AF) of shape (N,)
+            record_ids (np.array): patient record IDs for grouping of shape (N,)
+            embedding_params (dict): dictionary with tau/m parameters per subband
+            urp_size (int): target URP image size in pixels
+            n_cv_splits (int): number of cross-validation folds
+            results_dir (Path): directory path for saving results
+
+        Returns:
+            None
         """
         self.signals = signals.astype(np.float32)
         self.labels = labels.astype(np.int32)
@@ -57,7 +62,15 @@ class WaveletEvaluator:
         self.results = {}
 
     def _pad_signal(self, signal):
-        """Pad signal to power-of-2 length for SWT."""
+        """
+        pads signal to power-of-2 length required for SWT decomposition
+
+        Args:
+            signal (np.array): input signal array
+
+        Returns:
+            np.array: padded signal with reflection mode
+        """
         pad = self.pad_samples - len(signal)
         if pad <= 0:
             return signal[:self.pad_samples]
@@ -65,8 +78,15 @@ class WaveletEvaluator:
 
     def _extract_subband(self, signal_padded, wavelet, level):
         """
-        Decompose with SWT then reconstruct single subband.
-        SWT returns coeffs from coarse to fine, so D_level is at index (n_levels - level).
+        extracts single frequency subband using SWT decomposition and reconstruction
+
+        Args:
+            signal_padded (np.array): zero-padded signal ready for SWT
+            wavelet (str): wavelet function name
+            level (int): decomposition level to extract (2-8 for D2-D8)
+
+        Returns:
+            np.array: reconstructed subband signal
         """
         coeffs = pywt.swt(signal_padded, wavelet, level=N_SWT_LEVELS)
         n = len(coeffs)
@@ -84,7 +104,17 @@ class WaveletEvaluator:
         return sub.astype(np.float32)
 
     def _signal_to_urp(self, signal, tau, m):
-        """Convert signal to urp image using phase-space embedding."""
+        """
+        converts signal to URP image using phase-space embedding and JET colormap
+
+        Args:
+            signal (np.array): input signal to convert
+            tau (int): time delay for phase space reconstruction
+            m (int): embedding dimension for phase space reconstruction
+
+        Returns:
+            np.array: RGB URP image of shape (urp_size, urp_size, 3) normalized to [0,1]
+        """
         from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
         gen = RecurrencePlotGenerator(
@@ -116,21 +146,36 @@ class WaveletEvaluator:
         return rgb
 
     def _build_features(self, wavelet, level):
-        """Build feature matrix for one wavelet-subband combo."""
+        """
+        builds feature matrix by extracting texture features from URPs for one wavelet-subband combination
+
+        Args:
+            wavelet (str): wavelet function name
+            level (int): subband decomposition level (2-8)
+
+        Returns:
+            tuple: (features array, labels array, record IDs list)
+        """
         name = f'D{level}'
         tau = self.embedding_params[name]['tau']
         m = self.embedding_params[name]['m']
 
         X_list, y_list, rec_list = [], [], []
         n_failed = 0
+        failure_reasons = {'constant': 0, 'non_finite': 0, 'exception': 0}
 
         for sig, label, rec_id in zip(self.signals, self.labels, self.record_ids):
             try:
                 pad = self._pad_signal(sig)
                 sub = self._extract_subband(pad, wavelet, level)
 
-                if np.std(sub) < 1e-9:  # skip constant signals
+                sub_std = np.std(sub)
+                if sub_std < 1e-9:  # skip constant signals
                     n_failed += 1
+                    failure_reasons['constant'] += 1
+                    if failure_reasons['constant'] <= 1:  # Debug first constant signal
+                        sig_std = np.std(sig)
+                        print(f"\n      Constant subband for {rec_id}: orig_std={sig_std:.2e}, sub_std={sub_std:.2e}, sub_range=[{sub.min():.2e}, {sub.max():.2e}]", end="")
                     continue
 
                 urp = self._signal_to_urp(sub, tau, m)
@@ -138,23 +183,38 @@ class WaveletEvaluator:
 
                 if not np.all(np.isfinite(feat)):
                     n_failed += 1
+                    failure_reasons['non_finite'] += 1
                     continue
 
                 X_list.append(feat)
                 y_list.append(label)
                 rec_list.append(rec_id)
 
-            except Exception:
+            except Exception as e:
                 n_failed += 1
+                failure_reasons['exception'] += 1
+                if n_failed <= 3:  # Only print first 3 exceptions
+                    print(f"\n    Error processing {rec_id}: {type(e).__name__}: {e}")
                 continue
 
         if n_failed > 0:
-            print(f" [{n_failed} failed]", end="")
+            reasons = ', '.join([f"{k}={v}" for k, v in failure_reasons.items() if v > 0])
+            print(f" [{n_failed} failed: {reasons}]", end="")
 
         return np.array(X_list, dtype=np.float32), np.array(y_list), rec_list
 
     def _cross_validate(self, X, y, record_ids):
-        """Run grouped 5-fold CV with logistic regression."""
+        """
+        performs grouped cross-validation using logistic regression with balanced class weights
+
+        Args:
+            X (np.array): feature matrix of shape (N, n_features)
+            y (np.array): binary labels of shape (N,)
+            record_ids (list): patient record IDs for grouping
+
+        Returns:
+            dict: cross-validation results with mean, std, and fold-wise AUC scores
+        """
         clf = make_pipeline(
             StandardScaler(),
             LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced')
@@ -177,46 +237,71 @@ class WaveletEvaluator:
         }
 
     def evaluate_wavelet(self, wavelet):
-        """Test one wavelet across all subbands."""
+        """
+        evaluates single wavelet across all subbands (D2-D8) using cross-validated AUC
+
+        Args:
+            wavelet (str): wavelet function name to evaluate
+
+        Returns:
+            dict: summary results with median, mean, min, max AUC and per-subband details
+        """
         print(f"\n  Wavelet: {wavelet}")
         subband_results = {}
 
         for level in SUBBAND_LEVELS:
             name = f'D{level}'
-            lo = FS / (2 ** (level + 1))
-            hi = FS / (2 ** level)
-
             X, y, rec_ids = self._build_features(wavelet, level)
 
             # Need enough samples for CV
             if len(X) < 20 or y.sum() < 5 or (len(y) - y.sum()) < 5:
-                print(f"    {name}: insufficient data")
                 subband_results[name] = None
                 continue
 
             scores = self._cross_validate(X, y, rec_ids)
+            print(f" AUC={scores['mean']:.4f}±{scores['std']:.4f}")
             subband_results[name] = scores
 
-        # Summarize across subbands
         valid_means = [v['mean'] for v in subband_results.values() if v is not None]
-        summary = {
-            'median_auc': float(np.median(valid_means)),
-            'mean_auc': float(np.mean(valid_means)),
-            'min_auc': float(np.min(valid_means)),
-            'max_auc': float(np.max(valid_means)),
-            'per_subband': subband_results,
-        }
+        if not valid_means:
+            summary = {
+                'median_auc': 0.0,
+                'mean_auc': 0.0,
+                'min_auc': 0.0,
+                'max_auc': 0.0,
+                'per_subband': subband_results,
+            }
+        else:
+            summary = {
+                'median_auc': float(np.median(valid_means)),
+                'mean_auc': float(np.mean(valid_means)),
+                'min_auc': float(np.min(valid_means)),
+                'max_auc': float(np.max(valid_means)),
+                'per_subband': subband_results,
+            }
+            print(f"  Summary: median_AUC={summary['median_auc']:.4f}, mean_AUC={summary['mean_auc']:.4f}")
+
         self.results[wavelet] = summary
         return summary
 
     def run_all(self):
-        """Test all candidate wavelets."""
+        """
+        evaluates all candidate wavelets and returns ranked results
+
+        Returns:
+            pd.DataFrame: ranked wavelets by mean AUC score
+        """
         for wavelet in CANDIDATE_WAVELETS:
             self.evaluate_wavelet(wavelet)
         return self.rank_wavelets()
 
     def rank_wavelets(self):
-        """Sort wavelets by median AUC."""
+        """
+        ranks all evaluated wavelets by mean AUC in descending order
+
+        Returns:
+            pd.DataFrame: sorted dataframe with columns [wavelet, median_auc, mean_auc, min_auc, max_auc]
+        """
         rows = []
         for wavelet, res in self.results.items():
             rows.append({
@@ -227,7 +312,7 @@ class WaveletEvaluator:
                 'max_auc': res['max_auc'],
             })
 
-        df = pd.DataFrame(rows).sort_values('median_auc', ascending=False).reset_index(drop=True)
+        df = pd.DataFrame(rows).sort_values('mean_auc', ascending=False).reset_index(drop=True)
         return df
 
     def perform_statistical_tests(self, alpha=0.05):
@@ -317,14 +402,27 @@ class WaveletEvaluator:
         return stats_results
 
     def save_results(self):
-        """Save results to JSON."""
+        """
+        saves all wavelet evaluation results to JSON file
+
+        Returns:
+            None
+        """
         path = self.results_dir / 'wavelet_selection_results.json'
         with open(path, 'w') as f:
             json.dump(self.results, f, indent=2)
         print(f"\nResults saved -> {path}")
 
     def save_statistical_tests(self, stats_results):
-        """Save statistical test results to JSON."""
+        """
+        saves statistical test results to JSON file
+
+        Args:
+            stats_results (dict): dictionary containing statistical test results
+
+        Returns:
+            None
+        """
         path = self.results_dir / 'wavelet_statistical_tests.json'
         with open(path, 'w') as f:
             json.dump(stats_results, f, indent=2)

@@ -1,5 +1,5 @@
 """
-dataset classes for loading UTRP data from HDF5 files.
+Dataset classes for loading UTRP data_container from HDF5 files.
 """
 
 import numpy as np
@@ -10,22 +10,24 @@ from torch.utils.data import Dataset
 
 
 class H5Dataset(Dataset):
-    """Extracts data into raw NumPy matrices."""
+    """
+    extracts URP data from HDF5 files into raw NumPy matrices for PyTorch consumption
+    """
 
     def __init__(self, h5_path: Path, mode='multi', subband_keys=None):
         """
+        initializes the dataset by loading URP data and metadata from HDF5 file
+
         Args:
-            h5_path: Path to H5 file
-            mode: 'single' (loads single UTRP) or 'multi' (loads subbands)
-            subband_keys: List of subband keys to load (e.g., ['D2', 'D3', 'D4'])
-                         If None and mode='multi', loads all subbands D2-D8
+            h5_path (Path): path to HDF5 file containing URP data
+            mode (str): loading mode, 'single' loads full-band URP or 'multi' loads multiple subbands, defaults to 'multi'
+            subband_keys (list): list of subband keys to load, defaults to None which loads D2-D8
         """
         self.h5_path = h5_path
         self.mode = mode
         self.subband_keys = subband_keys
 
         with h5py.File(h5_path, 'r') as f:
-            # Read metadata
             meta_group = f.get('metadata', f)
             self.labels = meta_group['labels'][:].astype(np.int64)
             self.record_ids = np.array([r.decode() if isinstance(r, bytes) else r
@@ -33,10 +35,8 @@ class H5Dataset(Dataset):
             self.n_samples = len(self.labels)
 
             if mode == 'single':
-                # Load single-scale UTRP: (N_SAMPLES, 3, 256, 256)
                 self.data = f['single'][:].astype(np.float32)
             else:  # multi
-                # Load specified subbands
                 if subband_keys is None:
                     subband_keys = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
 
@@ -52,21 +52,41 @@ class H5Dataset(Dataset):
                         self.data[:, start_ch:end_ch, :, :] = f[key][:]
 
     def __len__(self):
+        """
+        returns the total number of samples in the dataset
+
+        Returns:
+            int: number of URP samples loaded from the HDF5 file
+        """
         return self.n_samples
 
     def __getitem__(self, idx):
+        """
+        retrieves a single URP sample and its label as PyTorch tensors
+
+        Args:
+            idx (int): index of the sample to retrieve
+
+        Returns:
+            tuple: (torch.Tensor, int) containing the URP image tensor and classification label
+        """
         x = self.data[idx]
         y = int(self.labels[idx])
         return torch.from_numpy(x), y
 
 
 class CombinedH5Dataset(Dataset):
+    """
+    combines multiple HDF5 dataset splits into a single unified dataset for cross-validation
+    """
     def __init__(self, h5_dir: Path, mode: str = 'multi', subband_keys: list = None):
         """
-        args:
-            h5_dir: directory containing train.h5, val.h5, test.h5
-            mode: 'single' or 'multi'
-            subband_keys: optional list of specific subbands to load (e.g., ['D2', 'D3', 'D4'])
+        initializes the combined dataset by loading train, validation, and test splits
+
+        Args:
+            h5_dir (Path): directory containing train.h5, val.h5, and test.h5 files
+            mode (str): loading mode, either 'single' or 'multi', defaults to 'multi'
+            subband_keys (list): optional list of specific subbands to load, defaults to None which loads all available
         """
         self.h5_dir = Path(h5_dir)
         self.mode = mode
@@ -75,7 +95,7 @@ class CombinedH5Dataset(Dataset):
         all_labels, all_rids, all_maps = [], [], []
         self.split_datasets = {}
 
-        for split in ('train', 'val'):
+        for split in ('train', 'val', 'test'):
             h5_path = self.h5_dir / f'{split}.h5'
             if not h5_path.exists():
                 continue
@@ -92,8 +112,23 @@ class CombinedH5Dataset(Dataset):
         self.sample_map = all_maps
 
     def __len__(self):
+        """
+        returns the total number of samples across all combined splits
+
+        Returns:
+            int: total number of samples in the combined dataset
+        """
         return len(self.labels)
 
     def __getitem__(self, idx: int):
+        """
+        retrieves a sample from the appropriate split using the unified index mapping
+
+        Args:
+            idx (int): global index across all splits
+
+        Returns:
+            tuple: (torch.Tensor, int) containing the URP image tensor and classification label
+        """
         split, local_idx = self.sample_map[idx]
         return self.split_datasets[split][local_idx]

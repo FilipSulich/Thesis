@@ -14,15 +14,15 @@ from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerat
 
 def compute_distance_matrix(signal, tau, m):
     """
-    compute unthresholded (continuous) distance matrix.
+    compute unthresholded (continuous) distance matrix for a time series signal using phase space reconstruction
 
-    args:
-        signal: input signal
-        tau: time delay
-        m: embedding dimension
+    Args:
+        signal (numpy.ndarray): input time series signal
+        tau (int): time delay for phase space reconstruction
+        m (int): embedding dimension for phase space reconstruction
 
-    returns:
-        distance matrix as numpy array
+    Returns:
+        numpy.ndarray: unthresholded distance matrix with continuous values representing pairwise distances
     """
     ts = TimeSeries(signal, embedding_dimension=m, time_delay=tau)
     settings = Settings(
@@ -38,21 +38,19 @@ def compute_distance_matrix(signal, tau, m):
 
 def compute_rqa_metrics(signal, tau, m, epsilon, output_dir='/tmp'):
     """
-    compute binary recurrence plot and RQA metrics.
+    compute binary recurrence plot and recurrence quantification analysis (RQA) metrics for a time series
 
-    args:
-        signal: input signal
-        tau: time delay
-        m: embedding dimension
-        epsilon: threshold
-        output_dir: temporary directory for computation
+    Args:
+        signal (numpy.ndarray): input time series signal
+        tau (int): time delay for phase space reconstruction
+        m (int): embedding dimension for phase space reconstruction
+        epsilon (float): threshold value for binarizing the recurrence plot
+        output_dir (str): temporary directory path for intermediate computation files (default: '/tmp')
 
-    returns:
-        dict with DET, LAM, TT, ENTR, and other RQA metrics
+    Returns:
+        dict: dictionary containing RQA metrics including DET (determinism), LAM (laminarity), TT (trapping time), and rp_matrix (recurrence plot matrix)
     """
     try:
-        os.environ['PYOPENCL_CTX'] = '0'
-
         rp_gen = RecurrencePlotGenerator(
             signal=signal,
             time_delay=tau,
@@ -71,36 +69,27 @@ def compute_rqa_metrics(signal, tau, m, epsilon, output_dir='/tmp'):
             'DET': safe_float(rqa_result.determinism),
             'LAM': safe_float(rqa_result.laminarity),
             'TT': safe_float(rqa_result.trapping_time),
-            'ENTR': safe_float(rqa_result.entropy_diagonal_lines),
-            'L_mean_diagonal': safe_float(rqa_result.average_diagonal_line),
-            'L_longest_diagonal': safe_float(rqa_result.longest_diagonal_line),
-            'L_longest_vertical': safe_float(rqa_result.longest_vertical_line),
             'rp_matrix': rp_matrix,
         }
 
     except Exception as e:
-        print(f"  warning: RP computation failed: {e}")
         return {
             'DET': 0.0,
             'LAM': 0.0,
             'TT': 0.0,
-            'ENTR': 0.0,
-            'L_mean_diagonal': 0.0,
-            'L_longest_diagonal': 0.0,
-            'L_longest_vertical': 0.0,
             'rp_matrix': None,
         }
 
 
 def extract_rp_array(rp_obj):
     """
-    extract numpy array from pyrqa result object.
+    extract numpy array from pyrqa result object or pass through if already an array
 
-    args:
-        rp_obj: pyrqa result or numpy array
+    Args:
+        rp_obj (object or numpy.ndarray): pyrqa computation result object or numpy array
 
-    returns:
-        numpy array
+    Returns:
+        numpy.ndarray: recurrence plot as numpy array
     """
     if hasattr(rp_obj, 'recurrence_matrix_reverse_normalized'):
         return rp_obj.recurrence_matrix_reverse_normalized

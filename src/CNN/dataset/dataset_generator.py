@@ -5,6 +5,7 @@ dataset generator for URP images with wavelet decomposition.
 import json
 import math
 import random
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import cv2
@@ -13,14 +14,16 @@ import numpy as np
 import pywt
 import wfdb
 from scipy import signal as sp_signal
+from tqdm import tqdm
+
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 
-# paths
 DATA_ROOT = Path(__file__).parent.parent.parent.parent
-DATA_DIR = DATA_ROOT / 'data' / 'paf'
-OUTPUT_DIR = DATA_ROOT / 'data' / 'processed_data'
-
+DATA_DIR = DATA_ROOT / 'data_container' / 'data' / 'raw_data' / 'paf'
+OUTPUT_DIR = DATA_ROOT / 'data_container' / 'data' / 'processed_data_new'
 
 # Configuration parameters
 FS_ORIG = 128
@@ -35,10 +38,6 @@ SUBBAND_LEVELS = [2, 3, 4, 5, 6, 7, 8]
 N_LEVELS_SWT = 10
 PAD_SAMPLES = math.ceil(SEGMENT_SAMPLES / 2**N_LEVELS_SWT) * 2**N_LEVELS_SWT
 
-
-# ============================================================================
-# helper functions
-# ============================================================================
 
 def _pad(x: np.ndarray) -> np.ndarray:
     """pad signal to power-of-2 length for SWT."""
@@ -66,17 +65,11 @@ def _apply_soft_threshold(coeffs: List[Tuple[np.ndarray, np.ndarray]]) -> List[T
 
     return denoised
 
-
-# ============================================================================
-# denoising and decomposition
-# ============================================================================
-
 def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET,n_levels: int = N_LEVELS_SWT,subband_levels: List[int] = SUBBAND_LEVELS,) -> Dict[str, np.ndarray]:
     """
     extract subbands without denoising (direct iSWT per subband).
 
-    decomposes signal with SWT, then reconstructs each subband individually
-    by zeroing all other levels. no soft thresholding applied.
+    decomposes signal with SWT, then reconstructs each subband individually by zeroing all other levels
 
     returns:
         dict of {'D2': ..., 'D3': ..., ...}
@@ -87,12 +80,7 @@ def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET
 
     for level in subband_levels:
         target_idx = n_lvls - level
-        # zero all coefficients except target level
-        zeroed = [
-            ((np.zeros_like(cA), cD) if j == target_idx
-             else (np.zeros_like(cA), np.zeros_like(cD)))
-            for j, (cA, cD) in enumerate(coeffs)
-        ]
+        zeroed = [((np.zeros_like(cA), cD) if j == target_idx else (np.zeros_like(cA), np.zeros_like(cD))) for j, (cA, cD) in enumerate(coeffs)]
         sub = pywt.iswt(zeroed, wavelet)[:SEGMENT_SAMPLES]
         subbands[f'D{level}'] = sub.astype(np.float32)
 
@@ -126,20 +114,12 @@ def denoise_and_extract_subbands(signal_padded: np.ndarray,wavelet: str = WAVELE
     for level in subband_levels:
         target_idx = n_lvls - level
         # zero all coefficients except target level
-        zeroed = [
-            ((np.zeros_like(cA), cD) if j == target_idx
-             else (np.zeros_like(cA), np.zeros_like(cD)))
-            for j, (cA, cD) in enumerate(denoised_coeffs)
-        ]
+        zeroed = [((np.zeros_like(cA), cD) if j == target_idx else (np.zeros_like(cA), np.zeros_like(cD))) for j, (cA, cD) in enumerate(denoised_coeffs)]
         sub = pywt.iswt(zeroed, wavelet)[:SEGMENT_SAMPLES]
         subbands[f'D{level}'] = (sub.astype(np.float32))
 
     return denoised, subbands
 
-
-# ============================================================================
-# recurrence plot generation
-# ============================================================================
 
 def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE) -> Optional[np.ndarray]:
     """
@@ -165,7 +145,7 @@ def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE) -> O
             rp = rp / d_max
 
         # resize and apply colormap
-        rp_r = cv2.resize(rp.astype(np.float32), (size, size), interpolation=cv2.INTER_LINEAR)
+        rp_r = cv2.resize(rp.astype(np.float32), (size, size), interpolation=cv2.INTER_AREA)
         np.fill_diagonal(rp_r, 0.0)
 
         u8 = (rp_r * 255).astype(np.uint8)
@@ -176,11 +156,6 @@ def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE) -> O
 
     except Exception as e:
         return None
-
-
-# ============================================================================
-# dataset splitting
-# ============================================================================
 
 def build_subject_groups(nsr_records: List[str], preaf_records: List[str]) -> List[Tuple[str, List[str], int]]:
     """
@@ -197,8 +172,8 @@ def build_subject_groups(nsr_records: List[str], preaf_records: List[str]) -> Li
     subjects = []
 
     # NSR patients: n01 and n01c are from same patient
-    for i in range(1, 51):
-        recs = [r for r in [f'n{i:02d}', f'n{i:02d}c'] if r in nsr_set]
+    for i in range(1, 51, 2):
+        recs = [r for r in [f'n{i:02d}', f'n{i:02d}c', f'n{i+1:02d}', f'n{i+1:02d}c'] if r in nsr_set]
         if recs:
             subjects.append((f'nsr_{i:02d}', recs, 0))
 
@@ -243,10 +218,6 @@ def split_subjects_721(subjects: List[Tuple],seed: int = 42) -> Dict[str, List[s
         'val': _extract(pa_va + ns_va),
         'test': _extract(pa_te + ns_te),
     }
-
-# ============================================================================
-# dataset generator
-# ============================================================================
 
 class DatasetGenerator:
     KEYS = ['single'] + [f'D{l}' for l in SUBBAND_LEVELS]
@@ -293,7 +264,7 @@ class DatasetGenerator:
 
     def _process_record(self,record_id: str,label: int,tau_single: int,m_single: int,subband_tau: Dict,subband_m: Dict) -> List[Dict]:
         """
-        process one ECG record into URP images.
+        process one record into URP images.
 
         returns:
             list of sample dicts with images and metadata
@@ -433,7 +404,8 @@ class DatasetGenerator:
 
         for split_name in ('train', 'val', 'test'):
             samples = []
-            for record_id in split[split_name]:
+            records = split[split_name]
+            for record_id in tqdm(records, desc=f'{split_name.capitalize()}'):
                 label = 0 if record_id in nsr_set else 1
                 samples.extend(self._process_record(
                     record_id, label,

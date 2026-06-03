@@ -4,19 +4,18 @@ from skimage.feature import graycomatrix, graycoprops
 from skimage.color import rgb2gray
 
 class URPFeatures:
-    """Extract texture statistics from URP images"""
+    """extracts texture and statistical features from URP images for classification"""
 
     @staticmethod
     def extract(URP_rgb):
         """
-        Pull features from URP image (H, W, 3) in range [0,1].
+        extracts 21 texture and statistical features from RGB URP image
 
-        Gets:
-        - Per-channel stats: mean, std, skew, kurtosis (12 total)
-        - Grayscale entropy (1)
-        - GLCM texture at different angles/distances (8)
+        Args:
+            URP_rgb (np.array): RGB URP image of shape (H, W, 3) with values in range [0,1]
 
-        Total: 21 features
+        Returns:
+            np.array: feature vector of 21 elements containing per-channel statistics (12), entropy (1), and GLCM texture features (8)
         """
         features = []
 

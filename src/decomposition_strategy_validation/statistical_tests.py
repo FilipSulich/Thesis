@@ -9,13 +9,13 @@ import pingouin as pg
 
 def get_significance_notation(p_value):
     """
-    convert p-value to significance notation.
+    convert p-value to standard significance notation using asterisk symbols
 
-    args:
-        p_value: p-value from statistical test
+    Args:
+        p_value (float): p-value from statistical test
 
-    returns:
-        string: '***' (p<0.001), '**' (p<0.01), '*' (p<0.05), 'ns' (not significant)
+    Returns:
+        str: significance notation ('***' for p<0.001, '**' for p<0.01, '*' for p<0.05, 'ns' for not significant)
     """
     if p_value < 0.001:
         return '***'
@@ -29,15 +29,15 @@ def get_significance_notation(p_value):
 
 def run_kruskal_wallis(agg_df, metric, pipeline_names):
     """
-    run kruskal-wallis test for overall differences across pipelines.
+    run kruskal-wallis H-test to detect overall differences in metric values across multiple pipelines
 
-    args:
-        agg_df: aggregated results DataFrame
-        metric: metric name to test
-        pipeline_names: list of pipeline names
+    Args:
+        agg_df (pandas.DataFrame): aggregated results dataframe containing pipeline and metric columns
+        metric (str): name of the metric column to test
+        pipeline_names (list): list of pipeline names to include in the test
 
-    returns:
-        dict with test results (statistic, p_value, significance)
+    Returns:
+        dict: dictionary containing test name, statistic, p-value, and significance notation
     """
     groups = [
         agg_df[agg_df['pipeline'] == p][metric].dropna().values
@@ -60,17 +60,16 @@ def run_kruskal_wallis(agg_df, metric, pipeline_names):
 
 def run_dunn_posthoc(agg_df, metric, pipeline_names):
     """
-    run dunn pairwise comparisons with holm-bonferroni correction.
+    run dunn pairwise post-hoc comparisons with holm-bonferroni correction and compute rank-biserial effect sizes
 
-    args:
-        agg_df: aggregated results DataFrame
-        metric: metric name to test
-        pipeline_names: list of pipeline names
+    Args:
+        agg_df (pandas.DataFrame): aggregated results dataframe containing pipeline and metric columns
+        metric (str): name of the metric column to test
+        pipeline_names (list): list of pipeline names to compare pairwise
 
-    returns:
-        list of dicts with pairwise comparison results
+    Returns:
+        list: list of dictionaries containing pairwise comparison results with p-values, rank-biserial correlations, and significance notations
     """
-    # dunn post-hoc test
     dunn_df = posthoc_dunn(
         agg_df,
         val_col=metric,
@@ -88,8 +87,6 @@ def run_dunn_posthoc(agg_df, metric, pipeline_names):
             if len(x) < 3 or len(y) < 3:
                 continue
 
-            # rank-biserial correlation (non-parametric effect size)
-            # computed from mann-whitney U test
             mwu_result = pg.mwu(x, y)
             rank_biserial = mwu_result['RBC'].values[0]  # RBC = rank-biserial correlation
 
@@ -111,31 +108,22 @@ def run_dunn_posthoc(agg_df, metric, pipeline_names):
 
 def run_statistical_analysis(agg_df, metrics, pipeline_names):
     """
-    perform statistical tests on pipeline comparison results.
+    perform comprehensive statistical analysis including kruskal-wallis tests and dunn post-hoc comparisons for multiple metrics
 
-    tests:
-    - kruskal-wallis: overall differences across pipelines
-    - dunn: pairwise comparisons with holm correction
-    - rank-biserial correlation: non-parametric effect sizes
+    Args:
+        agg_df (pandas.DataFrame): aggregated results dataframe containing pipeline and metric columns
+        metrics (list): list of metric names to analyze
+        pipeline_names (list): list of pipeline names to compare
 
-    args:
-        agg_df: aggregated results DataFrame
-        metrics: list of metric names to test
-        pipeline_names: list of pipeline names
-
-    returns:
-        DataFrame with statistical test results
+    Returns:
+        pandas.DataFrame: dataframe containing all statistical test results including overall tests and pairwise comparisons
     """
-    print("\nrunning statistical analysis...")
-
     stats_results = []
 
     for metric in metrics:
-        # kruskal-wallis test
         kw_result = run_kruskal_wallis(agg_df, metric, pipeline_names)
         stats_results.append(kw_result)
 
-        # dunn pairwise comparisons
         dunn_results = run_dunn_posthoc(agg_df, metric, pipeline_names)
         stats_results.extend(dunn_results)
 
@@ -144,10 +132,10 @@ def run_statistical_analysis(agg_df, metrics, pipeline_names):
 
 def save_statistical_results(stats_df, output_path):
     """
-    save statistical analysis results to CSV.
+    save statistical analysis results dataframe to a CSV file
 
-    args:
-        stats_df: DataFrame with statistical test results
-        output_path: path to save CSV file
+    Args:
+        stats_df (pandas.DataFrame): dataframe containing statistical test results
+        output_path (str): file path where the CSV will be saved
     """
     stats_df.to_csv(output_path, index=False)

@@ -4,20 +4,51 @@ from sklearn.neighbors import NearestNeighbors
 
 
 class FNN:
+    """computes false nearest neighbors to determine optimal embedding dimension for phase space reconstruction"""
+
     def __init__(self, signal, tau, max_dim=15, r_tol=15.0, a_tol=2.0):
+        """
+        initializes FNN calculator with signal and embedding parameters
+
+        Args:
+            signal (np.ndarray): input time series signal to reconstruct
+            tau (int): time delay for phase space embedding
+            max_dim (int): maximum embedding dimension to test
+            r_tol (float): relative tolerance threshold for distance ratio test
+            a_tol (float): absolute tolerance threshold for escape criterion
+
+        Returns:
+            None
+        """
+
         self.signal = signal
         self.tau = tau
         self.max_dim = max_dim
-        self.r_tol = r_tol  # Rtol threshold (typically 10-50)
-        self.a_tol = a_tol  # Atol threshold (typically 2)
+        self.r_tol = r_tol
+        self.a_tol = a_tol
         self.fnn_percentages = None
 
     def embed(self, m):
+        """
+        constructs m-dimensional phase space vectors using time delay embedding
+
+        Args:
+            m (int): embedding dimension
+
+        Returns:
+            np.ndarray: embedded vectors of shape (n_vectors, m)
+        """
         n = len(self.signal) - (m - 1) * self.tau
         embedded = np.array([self.signal[i:i + m * self.tau:self.tau] for i in range(n)])
         return embedded
 
     def compute_fnn(self):
+        """
+        calculates percentage of false nearest neighbors across all dimensions from 1 to max_dim
+
+        Returns:
+            np.ndarray: FNN percentages for each dimension tested
+        """
         fnn_percentages = []
 
         for m in range(1, self.max_dim + 1):
@@ -55,10 +86,8 @@ class FNN:
             # Count false nearest neighbors
             false_neighbors = 0
             for i in range(len(ratio)):
-                # Criterion 1: Rtol test
                 if ratio[i] > self.r_tol:
                     false_neighbors += 1
-                # Criterion 2: Atol test
                 elif nn_dist_m1[i] / Ra > self.a_tol:
                     false_neighbors += 1
 
@@ -69,7 +98,15 @@ class FNN:
         return self.fnn_percentages
 
     def get_optimal_dimension(self, threshold=5.0):
-        """Return the first dimension where FNN% drops below threshold."""
+        """
+        returns optimal embedding dimension where FNN percentage first drops below threshold
+
+        Args:
+            threshold (float): FNN percentage threshold (default 5.0%)
+
+        Returns:
+            int: optimal embedding dimension, or max_dim if threshold never reached
+        """
         if self.fnn_percentages is None:
             self.compute_fnn()
 

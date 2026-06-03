@@ -1,4 +1,4 @@
-from src.decomposition_strategy_selection import (
+from src.decomposition_strategy_validation import (
     ExperimentConfig,
     run_experiment,
 )
@@ -6,8 +6,8 @@ from src.decomposition_strategy_selection import (
 
 def main():
 
-    method = "HARMONIC"
-    # method = "NON_HARMONIC"
+    # method = "HARMONIC"
+    method = "NON_HARMONIC"
 
     subband_freq = {}
 
@@ -37,18 +37,13 @@ def main():
         output_dir=f'results_{method}'
     )
 
-    # define band names and pipelines
     band_names = ['D1', 'D2', 'D3', 'D4', 'A4']
     pipeline_names = ['swt_recon', 'swt_direct', 'dwt_recon']
 
-    # run experiment
-    agg_df, stats_df = run_experiment(
-        config=config,
-        band_names=band_names,
-        pipeline_names=pipeline_names,
-        n_trials=100
-    )
-    print("experiment finished")
+    agg_df, stats_df = run_experiment(config=config,band_names=band_names,pipeline_names=pipeline_names,n_trials=100)
+    print("experiment finished\n")
+    print(stats_df)
+
 
 if __name__ == '__main__':
     main()

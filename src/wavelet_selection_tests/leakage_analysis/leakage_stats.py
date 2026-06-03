@@ -8,19 +8,26 @@ from ..utils import _compute_rank_biserial
 
 
 class LeakageStats:
+    """performs statistical analysis on wavelet leakage test results"""
+
     def __init__(self, output_dir):
         """
+        initializes statistical analyzer with output directory
+
         Args:
-            output_dir: Where to save results
+            output_dir (str): directory path for saving statistical test results
         """
         self.output_dir = Path(output_dir)
 
     def save_all_stats(self, df: pd.DataFrame) -> None:
         """
-        Run all statistical tests and save to files without printing.
+        runs all statistical tests and saves results to files for both conditions
 
         Args:
-            df: DataFrame with columns [wavelet, condition, DER]
+            df (pd.DataFrame): results dataframe with columns [wavelet, condition, DER]
+
+        Returns:
+            None
         """
         for condition in ['Harmonic', 'Non-harmonic']:
             df_cond = df[df['condition'] == condition]
@@ -29,6 +36,16 @@ class LeakageStats:
             self._run_tests(df_cond, condition)
 
     def _save_summary(self, df_cond: pd.DataFrame, condition: str) -> None:
+        """
+        computes and saves descriptive statistics for one condition
+
+        Args:
+            df_cond (pd.DataFrame): dataframe filtered for single condition
+            condition (str): condition name for file naming
+
+        Returns:
+            None
+        """
         summary_stats = []
         for wavelet in sorted(df_cond['wavelet'].unique()):
             ders = df_cond[df_cond['wavelet'] == wavelet]['DER'].values
@@ -50,11 +67,14 @@ class LeakageStats:
 
     def _run_tests(self, df_cond: pd.DataFrame, condition: str) -> None:
         """
-        Kruskal-Wallis + Dunn post-hoc, save to files.
+        performs kruskal-wallis test and dunn post-hoc pairwise comparisons
 
         Args:
-            df_cond: DataFrame for one condition
-            condition: Condition name
+            df_cond (pd.DataFrame): dataframe filtered for single condition
+            condition (str): condition name for file naming
+
+        Returns:
+            None
         """
         wavelets = sorted(df_cond['wavelet'].unique())
         groups = [df_cond[df_cond['wavelet'] == w]['DER'].values for w in wavelets]
@@ -105,42 +125,40 @@ class LeakageStats:
                             'mean_diff': float(mean_diff)
                         })
 
-            # Save pairwise comparisons
             comp_df = pd.DataFrame(comparisons)
             comp_path = self.output_dir / f'pairwise_comparisons_{condition}.csv'
             comp_df.to_csv(comp_path, index=False)
 
         except Exception:
-            pass  # Skip if Dunn test fails
+            pass
 
     def create_db8_comparison_table(self, df: pd.DataFrame) -> None:
         """
-        Compare all wavelets vs db8, save to file without printing.
+        creates pairwise comparison table of all wavelets against db8 baseline
 
         Args:
-            df: DataFrame with all results
+            df (pd.DataFrame): complete results dataframe with all wavelets and conditions
+
+        Returns:
+            None
         """
         all_wavelets = sorted([w for w in df['wavelet'].unique() if w != 'db8'])
 
-        # Get db8 data
         db8_harm = df[(df['wavelet'] == 'db8') & (df['condition'] == 'Harmonic')]['DER'].values
         db8_nonharm = df[(df['wavelet'] == 'db8') & (df['condition'] == 'Non-harmonic')]['DER'].values
 
-        # Load Dunn results (if they exist)
         dunn_harm_path = self.output_dir / 'dunn_posthoc_Harmonic.csv'
         dunn_nonharm_path = self.output_dir / 'dunn_posthoc_Non-harmonic.csv'
 
         if not dunn_harm_path.exists() or not dunn_nonharm_path.exists():
-            return  # Skip if Dunn results not found
+            return
 
         dunn_harm = pd.read_csv(dunn_harm_path, index_col=0)
         dunn_nonharm = pd.read_csv(dunn_nonharm_path, index_col=0)
 
-        # Build comparison table
         comparison_data = []
 
         for wavelet in all_wavelets:
-            # Get p-values
             try:
                 p_harm = dunn_harm.loc['db8', wavelet]
             except:
@@ -151,11 +169,9 @@ class LeakageStats:
             except:
                 p_nonharm = np.nan
 
-            # Get wavelet data
             wav_harm = df[(df['wavelet'] == wavelet) & (df['condition'] == 'Harmonic')]['DER'].values
             wav_nonharm = df[(df['wavelet'] == wavelet) & (df['condition'] == 'Non-harmonic')]['DER'].values
 
-            # Rank-biserial correlation (effect size)
             rb_harm = _compute_rank_biserial(db8_harm, wav_harm)
             rb_nonharm = _compute_rank_biserial(db8_nonharm, wav_nonharm)
 
@@ -167,7 +183,6 @@ class LeakageStats:
                 'rank_biserial_harmonic': rb_harm
             })
 
-        # Save
         comparison_df = pd.DataFrame(comparison_data)
         output_path = self.output_dir / 'db8_comparison_table.csv'
         comparison_df.to_csv(output_path, index=False)

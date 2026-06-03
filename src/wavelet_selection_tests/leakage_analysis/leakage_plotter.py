@@ -5,18 +5,31 @@ import pandas as pd
 
 
 class LeakagePlotter:
+    """creates visualizations for wavelet leakage analysis results"""
+
     def __init__(self, output_dir):
+        """
+        initializes plotter with output directory for saving figures
+
+        Args:
+            output_dir (str): path to directory for saving plots
+
+        Returns:
+            None
+        """
         self.output_dir = Path(output_dir)
 
     def plot_der_comparison(self, df: pd.DataFrame) -> None:
         """
-        Side-by-side boxplots for harmonic vs non-harmonic.
+        creates side-by-side boxplot comparing energy ratios for harmonic vs non-harmonic conditions
 
         Args:
-            df: DataFrame with columns [wavelet, condition, DER]
+            df (pd.DataFrame): results dataframe with columns [wavelet, condition, DER]
+
+        Returns:
+            None
         """
 
-        # Sort wavelets by family (db, sym, coif) then order
         def wavelet_key(w):
             family = "".join([c for c in w if not c.isdigit()])
             order = int("".join([c for c in w if c.isdigit()]))
@@ -25,19 +38,17 @@ class LeakagePlotter:
 
         sorted_wavelets = sorted(df['wavelet'].unique(), key=wavelet_key)
 
-        # Colors for conditions
         colors = {
             'Harmonic': '#1f77b4',
             'Non-harmonic': '#d62728'
         }
 
-        # Build boxplot data
         positions = []
         data = []
         box_colors = []
 
         for i, wavelet in enumerate(sorted_wavelets):
-            base_pos = i * 3  # spacing between wavelets
+            base_pos = i * 3
 
             for j, condition in enumerate(['Harmonic', 'Non-harmonic']):
                 condition_data = df[
@@ -50,7 +61,6 @@ class LeakagePlotter:
                     data.append(condition_data)
                     box_colors.append(colors[condition])
 
-        # Create figure
         fig, ax = plt.subplots(figsize=(16, 7))
 
         box = ax.boxplot(
@@ -61,12 +71,10 @@ class LeakagePlotter:
             showfliers=False
         )
 
-        # Color boxes
         for patch, color in zip(box['boxes'], box_colors):
             patch.set_facecolor(color)
             patch.set_alpha(0.35)
 
-        # X-axis labels (centered between two boxes)
         x_ticks = [i * 3 + 0.3 for i in range(len(sorted_wavelets))]
         ax.set_xticks(x_ticks)
         ax.set_xticklabels(
@@ -83,10 +91,8 @@ class LeakagePlotter:
 
         # Legend
         legend_elements = [
-            Patch(facecolor=colors['Harmonic'], alpha=0.35,
-                  edgecolor='black', label='Harmonic'),
-            Patch(facecolor=colors['Non-harmonic'], alpha=0.35,
-                  edgecolor='black', label='Non-harmonic')
+            Patch(facecolor=colors['Harmonic'], alpha=0.35, edgecolor='black', label='Harmonic'),
+            Patch(facecolor=colors['Non-harmonic'], alpha=0.35,edgecolor='black', label='Non-harmonic')
         ]
 
         ax.legend(handles=legend_elements, loc='lower right', fontsize=11)

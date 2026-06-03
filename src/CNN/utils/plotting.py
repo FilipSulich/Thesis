@@ -1,5 +1,5 @@
 """
-plotting utilities for model evaluation and visualization.
+Plotting utilities for model evaluation and visualization.
 """
 
 import numpy as np
@@ -8,15 +8,7 @@ from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_prec
 
 
 DEFAULT_COLORS = {
-    'single': '#1f77b4',
-    'multi': '#d62728',
-    'denoise': '#2ca02c',
-    'full': '#d62728',
-    'high_freq': '#2ca02c',
-    'low_freq': '#9467bd',
-    'full_band': '#1f77b4',
     'full_multiscale': '#d62728',
-    'attention_guided': '#17becf',
     'Full-band': '#1f77b4',
     'Multi-scale': '#d62728',
     'Multi-scale denoised': '#2ca02c',
@@ -24,21 +16,10 @@ DEFAULT_COLORS = {
     'Low-frequency': '#9467bd'
 }
 
-PLOT_STYLE = {
-    'figure.figsize': (12, 8),
-    'font.size': 11,
-    'axes.labelsize': 12,
-    'axes.titlesize': 13,
-    'xtick.labelsize': 10,
-    'ytick.labelsize': 10,
-    'legend.fontsize': 11
-}
-
-# ============================================================================
 
 def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'):
     """
-    plot roc curves for multiple models.
+    Plot roc curves for multiple models.
 
     args:
         data_dict: dict mapping model names to list of fold results each fold result should have 'probs' and 'labels'
@@ -68,18 +49,16 @@ def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'
         mean_tpr = np.mean(tprs, axis=0)
         std_tpr = np.std(tprs, axis=0)
         mean_auc = np.mean(aucs)
-        std_auc = np.std(aucs)
 
         # plot mean curve
         color = colors.get(model_name, '#000000')
-        ax.plot(mean_fpr, mean_tpr, color=color, lw=2.5, label=f'{model_name} (AUC = {mean_auc:.3f} ± {std_auc:.3f})')
+        ax.plot(mean_fpr, mean_tpr, color=color, lw=2.5, label=f'{model_name} (AUC = {mean_auc:.3f})')
 
         # plot std
         tpr_upper = np.minimum(mean_tpr + std_tpr, 1)
         tpr_lower = np.maximum(mean_tpr - std_tpr, 0)
         ax.fill_between(mean_fpr, tpr_lower, tpr_upper, color=color, alpha=0.2)
 
-    # diagonal reference line (random classifier)
     ax.plot([0, 1], [0, 1], 'k--', lw=1.5, alpha=0.6, label='Random (AUC=0.500)')
 
     ax.set_xlabel('False Positive Rate', fontweight='bold')
@@ -99,13 +78,9 @@ def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'
     return fig, ax
 
 
-# ============================================================================
-# precision-recall curves
-# ============================================================================
-
 def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Recall Curves'):
     """
-    plot precision-recall curves for multiple models.
+    Plot Precision-Recall curves for multiple models.
 
     args:
         data_dict: dict mapping model names to list of fold results
@@ -180,7 +155,7 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
 
 def plot_metric_boxplots(data_dict, metrics=['auc', 'auprc'], colors=None, output_path=None, title='Model Comparison'):
     """
-    plot boxplots comparing metrics across models.
+    Plot boxplots comparing metrics across models.
 
     args:
         data_dict: dict mapping model names to list of fold results
@@ -200,7 +175,6 @@ def plot_metric_boxplots(data_dict, metrics=['auc', 'auprc'], colors=None, outpu
         axes = [axes]
 
     for ax, metric in zip(axes, metrics):
-        # collect data for all models
         data = []
         labels = []
         box_colors = []
@@ -240,7 +214,7 @@ def plot_metric_boxplots(data_dict, metrics=['auc', 'auprc'], colors=None, outpu
 
 def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='ROC and Precision-Recall Curves'):
     """
-    plot roc and pr curves side-by-side.
+    Plot ROC and PR curves side-by-side.
 
     args:
         data_dict: dict mapping model names to list of fold results
@@ -306,10 +280,9 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
         mean_precision = np.mean(precisions_interp, axis=0)
         std_precision = np.std(precisions_interp, axis=0)
         mean_auprc = np.mean(auprcs)
-        std_auprc = np.std(auprcs)
 
         color = colors.get(model_name, '#000000')
-        ax2.plot(mean_recall, mean_precision, color=color, lw=2.5, label=f'{model_name} ({mean_auprc:.3f} ± {std_auprc:.3f})')
+        ax2.plot(mean_recall, mean_precision, color=color, lw=2.5, label=f'{model_name} ({mean_auprc:.3f})')
         ax2.fill_between(mean_recall, np.maximum(mean_precision - std_precision, 0), np.minimum(mean_precision + std_precision, 1), color=color, alpha=0.2)
 
     # random classifierbaseline

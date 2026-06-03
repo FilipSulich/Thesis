@@ -8,8 +8,29 @@ from wavelets.wavelet_transform import WaveletTransform
 
 
 class DWT(WaveletTransform):
+    """discrete wavelet transform (DWT) implementation using PyWavelets"""
+
     def decompose(self, signal: np.ndarray, level) -> list:
+        """
+        performs multi-level DWT decomposition producing decimated coefficients
+
+        Args:
+            signal (np.ndarray): input signal to decompose
+            level (int): number of decomposition levels
+
+        Returns:
+            list: wavelet coefficients [cA_n, cD_n, cD_n-1, ..., cD_1] where cA is approximation and cD are details
+        """
         return pywt.wavedec(signal, self.wavelet, level=level)
 
     def reconstruct(self, coeffs: list) -> np.ndarray:
+        """
+        reconstructs signal from DWT coefficients using inverse transform
+
+        Args:
+            coeffs (list): wavelet coefficients from decompose()
+
+        Returns:
+            np.ndarray: reconstructed time-domain signal
+        """
         return pywt.waverec(coeffs, self.wavelet)

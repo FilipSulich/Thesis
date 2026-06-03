@@ -4,7 +4,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.decomposition_strategy_selection.config import (
+from src.decomposition_strategy_validation.config import (
     PIPELINE_LABELS,
     PIPELINE_COLORS,
 )
@@ -16,18 +16,18 @@ METRIC_LABELS = {
     'tt_deviation': 'TT Deviation',
     'entr_deviation': 'ENTR Deviation',
     'hamming_distance': 'Hamming Distance',
-    'rp_pattern_corr': 'RP Pattern Correlation'
+    'rp_pattern_corr': 'RP Person Correlation'
 }
 
 
 def plot_boxplot_comparisons(agg_df, metrics, output_dir):
     """
-    generate box plots for pipeline comparison with consistent style.
+    generate box plots comparing pipeline performance across multiple metrics with consistent styling
 
-    args:
-        agg_df: DataFrame with columns ['trial', 'pipeline', metric1, metric2, ...]
-        metrics: list of metric names to plot
-        output_dir: directory to save plots
+    Args:
+        agg_df (pandas.DataFrame): aggregated results dataframe with columns ['trial', 'pipeline', metric1, metric2, ...]
+        metrics (list): list of metric column names to visualize
+        output_dir (str): directory path where plots will be saved as PNG and PDF files
     """
     df = agg_df.copy()
     df['pipeline'] = df['pipeline'].map(PIPELINE_LABELS)
@@ -41,7 +41,6 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
     for idx, metric in enumerate(metrics):
         ax = axes[idx]
 
-        # prepare data for boxplot
         pipelines = ['SWT-R', 'SWT-D', 'DWT-R']
         data = [
             df[df['pipeline'] == p][metric].dropna().values
@@ -49,7 +48,6 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
         ]
         colors = [PIPELINE_COLORS[p] for p in pipelines]
 
-        # create boxplot
         box = ax.boxplot(
             data,
             patch_artist=True,
@@ -57,12 +55,10 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
             showfliers=False
         )
 
-        # apply colors
         for patch, color in zip(box['boxes'], colors):
             patch.set_facecolor(color)
             patch.set_alpha(0.35)
 
-        # formatting
         ax.set_xticks(range(1, len(pipelines) + 1))
         ax.set_xticklabels(pipelines, fontsize=11)
 
@@ -83,7 +79,6 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
 
     plt.tight_layout()
 
-    # save
     plot_path = os.path.join(output_dir, 'pipeline_comparison_boxplots.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
 
@@ -95,19 +90,19 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
 
 def plot_violinplot_comparisons(agg_df, metrics, output_dir):
     """
-    generate violin plots for pipeline comparison with consistent style.
+    generate violin plots showing distribution of pipeline performance across multiple metrics with enhanced visualization
 
-    args:
-        agg_df: DataFrame with columns ['trial', 'pipeline', metric1, metric2, ...]
-        metrics: list of metric names to plot
-        output_dir: directory to save plots
+    Args:
+        agg_df (pandas.DataFrame): aggregated results dataframe with columns ['trial', 'pipeline', metric1, metric2, ...]
+        metrics (list): list of metric column names to visualize
+        output_dir (str): directory path where plots will be saved as PNG and PDF files
     """
-    # rename pipelines for display
+
     df = agg_df.copy()
     df['pipeline'] = df['pipeline'].map(PIPELINE_LABELS)
 
     n_metrics = len(metrics)
-    fig, axes = plt.subplots(1, n_metrics, figsize=(5 * n_metrics, 6))
+    fig, axes = plt.subplots(1, n_metrics, figsize=(4.5 * n_metrics, 5.5))
 
     if n_metrics == 1:
         axes = [axes]
@@ -115,7 +110,6 @@ def plot_violinplot_comparisons(agg_df, metrics, output_dir):
     for idx, metric in enumerate(metrics):
         ax = axes[idx]
 
-        # prepare data for violin plot
         pipelines = ['SWT-R', 'SWT-D', 'DWT-R']
         data = [
             df[df['pipeline'] == p][metric].dropna().values
@@ -123,50 +117,46 @@ def plot_violinplot_comparisons(agg_df, metrics, output_dir):
         ]
         colors = [PIPELINE_COLORS[p] for p in pipelines]
 
-        # create violin plot
         parts = ax.violinplot(
             data,
             positions=range(1, len(pipelines) + 1),
-            widths=0.55,
+            widths=0.6,
             showmeans=False,
             showmedians=False,
-            showextrema=False
+            showextrema=False,
         )
 
-        # apply colors
         for pc, color in zip(parts['bodies'], colors):
             pc.set_facecolor(color)
-            pc.set_alpha(0.35)
+            pc.set_edgecolor(color)
+            pc.set_linewidth(1.2)
+            pc.set_alpha(0.4)
 
-        # add quartiles and medians manually
         for i, vals in enumerate(data, start=1):
             quartile1, median, quartile3 = np.percentile(vals, [25, 50, 75])
-            ax.vlines(i, quartile1, quartile3, color='k', linestyle='-', lw=5)
-            ax.vlines(i, np.min(vals), np.max(vals), color='k', linestyle='-', lw=1)
-            ax.scatter(i, median, color='white', s=30, zorder=3, edgecolors='k')
+            ax.vlines(i, np.min(vals), np.max(vals), color='#2C3E50', linestyle='-', lw=1, zorder=2)
+            ax.vlines(i, quartile1, quartile3, color='#2C3E50', linestyle='-', lw=4.5,  zorder=2)
+            ax.scatter(i, median, color='white', s=25, zorder=3, edgecolors='#2C3E50', linewidths=1.5)
 
-        # formatting
         ax.set_xticks(range(1, len(pipelines) + 1))
-        ax.set_xticklabels(pipelines, fontsize=11)
+        ax.set_xticklabels(pipelines, fontsize=10.5, color='#333333')
 
-        ax.set_xlabel('Pipeline', fontsize=12, fontweight='bold')
-        ax.set_ylabel(
-            METRIC_LABELS.get(metric, metric),
-            fontsize=12,
-            fontweight='bold'
-        )
+        ax.set_xlabel('Pipeline', fontsize=11, fontweight='bold', labelpad=10, color='#222222')
+        ax.tick_params(axis='both', which='major', labelsize=10, labelcolor='#333333')
 
         ax.set_title(
             METRIC_LABELS.get(metric, metric),
-            fontsize=13,
-            fontweight='bold'
+            fontsize=12,
+            fontweight='bold',
+            pad=14,
+            color='#111111'
         )
 
-        ax.grid(alpha=0.3, linestyle='--')
+        ax.grid(True, alpha=0.25, linestyle='--', color='#999999', zorder=0)
+        ax.set_axisbelow(True)
 
     plt.tight_layout()
 
-    # save
     plot_path = os.path.join(output_dir, 'pipeline_comparison_violinplots.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
 

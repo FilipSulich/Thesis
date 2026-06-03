@@ -4,13 +4,31 @@ from scipy.signal import argrelextrema
 
 
 class AMI:
+    """computes average mutual information to estimate optimal time delay for phase space reconstruction"""
+
     def __init__(self, signal, max_lag=100):
+        """
+        initializes AMI calculator with signal and maximum lag to test
+
+        Args:
+            signal (np.ndarray): input time series signal
+            max_lag (int): maximum time lag to compute AMI for
+
+        Returns:
+            None
+        """
         self.signal = signal
         self.max_lag = max_lag
         self.ami_values = None
         self.local_minima = None
 
     def compute_ami(self):
+        """
+        calculates average mutual information across all time lags from 1 to max_lag
+
+        Returns:
+            np.ndarray: AMI values for each lag
+        """
         ami_values = []
 
         for lag in range(1, self.max_lag + 1):
@@ -21,6 +39,18 @@ class AMI:
         return self.ami_values
 
     def _mutual_information(self, x, y, bins=50):
+        """
+        computes mutual information between two time series using histogram-based estimation
+
+        Args:
+            x (np.ndarray): first time series
+            y (np.ndarray): second time series (time-delayed version)
+            bins (int): number of bins for histogram estimation
+
+        Returns:
+            float: mutual information value
+        """
+
         hist_xy, _, _ = np.histogram2d(x, y, bins=bins)
         hist_x, _ = np.histogram(x, bins=bins)
         hist_y, _ = np.histogram(y, bins=bins)
@@ -38,6 +68,12 @@ class AMI:
         return mi
 
     def find_local_minima(self):
+        """
+        finds all local minima in the AMI curve
+
+        Returns:
+            np.ndarray: array of lag values where local minima occur
+        """
         if self.ami_values is None:
             self.compute_ami()
 
@@ -46,6 +82,12 @@ class AMI:
         return self.local_minima
 
     def get_first_minimum(self):
+        """
+        returns the first local minimum lag value as optimal time delay
+
+        Returns:
+            int: first local minimum lag value, or None if no minima found
+        """
         if self.local_minima is None:
             self.find_local_minima()
         return self.local_minima[0] if len(self.local_minima) > 0 else None
