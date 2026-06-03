@@ -4,7 +4,7 @@
 ### BSc Data Science and Artificial Intelligence
 ### Maastricht University
 ### Author: Filip Sulich
-### Supervisors: Dr. Dr Joël Karel, Dr Pietro Bonizzi
+### Supervisors: Dr Joël Karel, Dr Pietro Bonizzi
 
 ---
 
@@ -101,7 +101,7 @@ Validation of decomposition strategies using synthetic signals.
 ```bash
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate 
 
 # Install dependencies
 pip install -r requirements.txt
@@ -114,19 +114,11 @@ pip install -r requirements.txt
 - scikit-learn
 - h5py
 - pywt (PyWavelets)
-- pyrqa (for recurrence quantification analysis)
+- pyrqa (for recurrence plot generation)
 - matplotlib
 - pandas
 
 ## Usage Examples
-
-### Train Multi-Scale CNN
-```bash
-cd src/CNN/training/examples
-python train_multiscale.py
-```
-
-### Run Wavelet Selection Experiments
 ```bash
 # Leakage analysis
 cd src/wavelet_selection_tests/leakage_analysis
@@ -151,7 +143,7 @@ python ablation_study.py
 
 ## Methodology
 
-This implementation follows a multi-step approach:
+This implementation follows these steps :
 
 1. **Wavelet Decomposition**: ECG signals are decomposed into frequency subbands (D2-D8) using Stationary Wavelet Transform (SWT) with db8 wavelet
 2. **Phase Space Reconstruction**: Each subband is embedded using time delay parameters (tau from AMI, m from FNN)
@@ -159,27 +151,21 @@ This implementation follows a multi-step approach:
 4. **Multi-Scale CNN**: URPs from all subbands are processed by separate CNN branches with late feature-fusion and attention mechanisms to modulate the contribution of each scale
 5. **Classification**: Binary classification (NSR vs Pre-AF) using weighted cross-entropy loss
 
-## Results
-Results are saved to `results_final/` directory
-
 ## Disclosure: Use of Generative AI
 
-Generative AI (Claude model Opus 4.6) was used to assist with the following aspects of this project:
+Generative AI (Claude model Opus 4.6) was used to assist only with the following aspects of this project:
 
 **Code Documentation:**
 - Generation of docstrings for Python functions and classes
 - Formatting of documentation to maintain consistency across the codebase
-- Grammar and clarity improvements in code comments
+- Clarity improvements in code comments
 
 **Code Refactoring:**
+- Help with removing code redundancy and optimization
 - Suggestions for code organization and structure improvements
-- Identification of code redundancies and optimization opportunities
 
-**README and Documentation:**
+**README file**
 - Structuring and formatting of this README.md file
-
-**Important Note:**
-All core algorithmic implementations, experimental design, scientific methodology, and research contributions were developed by the author. The AI was used solely as a productivity tool for documentation and code organization, not for scientific or algorithmic decision-making.
 
 ## License
 MIT License
