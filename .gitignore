@@ -4,3 +4,4 @@ __pycache__
 /data_container/data
 /results
 /old
+**/__pycache__/
