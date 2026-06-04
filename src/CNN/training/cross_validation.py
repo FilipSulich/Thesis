@@ -189,11 +189,11 @@ class CrossValidator:
         Returns:
             dictionary with aggregated results across folds
         """
-        print(f"Model: {self.model_type}")
+        print(f"model: {self.model_type}")
         if self.model_type == 'multi':
             subbands = self.subband_keys if self.subband_keys else ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
-            print(f"Subbands: {subbands}")
-            print(f"Denoise: {self.denoise}")
+            print(f"subbands: {subbands}")
+            print(f"denoise: {self.denoise}")
 
         dataset_mode = self._get_dataset_mode()
         dataset = FullDataset(

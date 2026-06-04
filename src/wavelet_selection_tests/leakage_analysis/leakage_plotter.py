@@ -84,9 +84,10 @@ class LeakagePlotter:
             fontsize=11
         )
 
-        ax.set_xlabel('Wavelet Function', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Energy Ratio (ER)', fontsize=12, fontweight='bold')
-        ax.set_title('Energy Leakage Analysis', fontsize=13, fontweight='bold', pad=20)
+        ax.set_xlabel('Wavelet Function', fontsize=14, fontweight='bold')
+        ax.set_ylabel('Energy Ratio (ER)', fontsize=14, fontweight='bold')
+        ax.set_title('Energy Leakage Analysis', fontsize=16, fontweight='bold', pad=20)
+        ax.tick_params(axis='both', which='major', labelsize=11)
         ax.grid(alpha=0.3, linestyle='--')
 
         # Legend
@@ -95,9 +96,9 @@ class LeakagePlotter:
             Patch(facecolor=colors['Non-harmonic'], alpha=0.35,edgecolor='black', label='Non-harmonic')
         ]
 
-        ax.legend(handles=legend_elements, loc='lower right', fontsize=11)
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=12)
 
         plt.tight_layout()
-        plot_path = self.output_dir / 'der_boxplot.png'
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plot_path = self.output_dir / 'der_boxplot.pdf'
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight', format='pdf')
         plt.close()

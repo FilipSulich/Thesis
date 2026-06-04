@@ -32,7 +32,7 @@ def main():
         n_trials=100
     )
 
-
+    print("done")
     #plots
     plotter = LeakagePlotter(output_dir)
     plotter.plot_der_comparison(df)

@@ -65,7 +65,7 @@ def main():
     )
     plot_roc_and_pr_combined(
         results,
-        output_path=OUTPUT_DIR / 'roc_pr_comparison.png',
+        output_path=OUTPUT_DIR / 'roc_pr_comparison.pdf',
         title='Model Comparison across 10-fold CV\n ROC and Precision-Recall Curves'
     )
 

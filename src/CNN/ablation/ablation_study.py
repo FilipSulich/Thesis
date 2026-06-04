@@ -45,11 +45,15 @@ def main():
 
     results = {}
 
-    print("evaluating models...")
+    print("evaluating high-frequency model...")
     results['High-frequency'] = evaluate_model_folds(model_class=MultiScaleCNN,model_params={'n_subbands': len(SUBBANDS_HIGH_FREQ),'dropout': 0.5}, checkpoint_dir=RESULTS_HIGH_FREQ, dataset=dataset_high, device=DEVICE, batch_size=BATCH_SIZE)
+    print("\nevaluating low-frequency model...")
     results['Low-frequency'] = evaluate_model_folds(model_class=MultiScaleCNN, model_params={'n_subbands': len(SUBBANDS_LOW_FREQ), 'dropout': 0.5}, checkpoint_dir=RESULTS_LOW_FREQ, dataset=dataset_low, device=DEVICE,batch_size=BATCH_SIZE)
+    print("\nevaluating mid-frequency model...")
     results['Mid-frequency'] = evaluate_model_folds(model_class=MultiScaleCNN, model_params={'n_subbands': len(SUBBANDS_MID_FREQ), 'dropout': 0.5}, checkpoint_dir=RESULTS_MID_FREQ, dataset=dataset_mid, device=DEVICE, batch_size=BATCH_SIZE)
+    print("\nevaluating full multi-frequency model...")
     results['Multi-scale'] = evaluate_model_folds(model_class=MultiScaleCNN, model_params={'n_subbands': len(SUBBANDS_FULL), 'dropout': 0.5}, checkpoint_dir=RESULTS_FULL, dataset=dataset_full, device=DEVICE, batch_size=BATCH_SIZE)
+
     print("models evaluated")
 
     stats = compare_models(
@@ -60,7 +64,7 @@ def main():
 
     plot_roc_and_pr_combined(
         results,
-        output_path=OUTPUT_DIR / 'roc_pr_comparison.png',
+        output_path=OUTPUT_DIR / 'roc_pr_comparison_ablation.pdf',
         title='Ablation Study Comparison across 10-fold CV\n ROC and Precision-Recall Curves'
     )
 

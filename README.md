@@ -86,11 +86,11 @@ Validation of decomposition strategies using synthetic signals.
 **Runnable scripts:**
 - `run.py` - Run the experiment and save results with plots
 
-## Dataset
+## Dataset and model weights
 
-**IMPORTANT:** The processed dataset and trained model weights is not included in this repository due to size constraints (it is more than 30 GB of data).
+**IMPORTANT:** The processed dataset and trained model weights are not included in this repository due to size constraints (it is more than 30 GB of data).
 
-**Download the dataset:**
+**Download the data:**
 1. Download the URP data and model weights from Google Drive: **https://drive.google.com/drive/folders/1NplSsH6urf2LSVbM0s3QcqdQjDLAxCP7?usp=sharing**
 2. Place the downloaded `data` folder into the `data_container/` directory
 3. Run the scripts as needed to evaluate results or train the models (note that training the models from scratch will require significant computational resources and time, so it is recommended to use the provided trained weights for evaluation)
@@ -144,15 +144,17 @@ python ablation_study.py
 
 ## Disclosure: Use of Generative AI
 
-Generative AI (Claude by Anthropic, model Opus 4.6) was used to assist with the following aspects of this project:
+Generative AI (Claude Code by Anthropic, model Opus 4.6) was used to assist with the following aspects of this project:
 
 **Code Documentation:**
 - Generation of documentation for functions and classes
 - Clarity improvements in code comments
+- Help with formatting this README file
 
 **Code Refactoring:**
 - Help with removing code redundancy and optimization
 - Suggestions for code organization and structure improvements
+
 
 ## License
 MIT License

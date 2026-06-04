@@ -57,10 +57,11 @@ def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'
 
     ax.plot([0, 1], [0, 1], 'k--', lw=1.5, alpha=0.6, label='Random (AUC=0.500)')
 
-    ax.set_xlabel('False Positive Rate', fontweight='bold')
-    ax.set_ylabel('True Positive Rate', fontweight='bold')
-    ax.set_title(title, fontweight='bold')
-    ax.legend(loc='lower right')
+    ax.set_xlabel('False Positive Rate', fontweight='bold', fontsize=14)
+    ax.set_ylabel('True Positive Rate', fontweight='bold', fontsize=14)
+    ax.set_title(title, fontweight='bold', fontsize=16)
+    ax.legend(loc='lower right', fontsize=12)
+    ax.tick_params(axis='both', which='major', labelsize=11)
     ax.grid(alpha=0.3, linestyle='--')
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -68,7 +69,7 @@ def plot_roc_curves(data_dict, colors=None, output_path=None, title='ROC Curves'
     plt.tight_layout()
 
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight', format='pdf')
 
     return fig, ax
 
@@ -90,7 +91,6 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
-    # calculate positive class ratio for random baseline
     all_labels = []
     for fold_results in data_dict.values():
         for fold in fold_results:
@@ -101,7 +101,6 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
         precisions_interp = []
         auprcs = []
 
-        # collect pr curves from all folds
         for fold in fold_results:
             precision, recall, _ = precision_recall_curve(fold['labels'], fold['probs'])
             precision_rev = precision[::-1]
@@ -112,27 +111,24 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
             auprc = average_precision_score(fold['labels'], fold['probs'])
             auprcs.append(auprc)
 
-        # compute mean and std
         mean_precision = np.mean(precisions_interp, axis=0)
         std_precision = np.std(precisions_interp, axis=0)
         mean_auprc = np.mean(auprcs)
         std_auprc = np.std(auprcs)
 
-        # plot mean curve
         color = colors.get(model_name, '#000000')
         ax.plot(mean_recall, mean_precision, color=color, lw=2.5, label=f'{model_name} (AUPRC = {mean_auprc:.3f} +- {std_auprc:.3f})')
 
-        # plot std
         prec_upper = np.minimum(mean_precision + std_precision, 1)
         prec_lower = np.maximum(mean_precision - std_precision, 0)
         ax.fill_between(mean_recall, prec_lower, prec_upper, color=color, alpha=0.2)
 
-    # random classifier baseline
     ax.axhline(pos_ratio, color='k', linestyle='--', lw=1.5, alpha=0.6, label=f'Random ({pos_ratio:.3f})')
-    ax.set_xlabel('Recall', fontweight='bold')
-    ax.set_ylabel('Precision', fontweight='bold')
-    ax.set_title(title, fontweight='bold')
-    ax.legend(loc='lower left')
+    ax.set_xlabel('Recall', fontweight='bold', fontsize=14)
+    ax.set_ylabel('Precision', fontweight='bold', fontsize=14)
+    ax.set_title(title, fontweight='bold', fontsize=16)
+    ax.legend(loc='lower left', fontsize=12)
+    ax.tick_params(axis='both', which='major', labelsize=11)
     ax.grid(alpha=0.3, linestyle='--')
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -140,7 +136,7 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
     plt.tight_layout()
 
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight', format='pdf')
 
     return fig, ax
 
@@ -191,15 +187,16 @@ def plot_metric_box_plots(data_dict, metrics=None, colors=None, output_path=None
             x_jitter = np.random.normal(i + 1, 0.04, len(values))
             ax.scatter(x_jitter, values, color=color, s=50, alpha=0.9, zorder=3)
 
-        ax.set_ylabel(metric.upper(), fontsize=12, fontweight='bold')
-        ax.set_title(f'{metric.upper()} Comparison', fontsize=13, fontweight='bold')
+        ax.set_ylabel(metric.upper(), fontsize=14, fontweight='bold')
+        ax.set_title(f'{metric.upper()} Comparison', fontsize=16, fontweight='bold')
+        ax.tick_params(axis='both', which='major', labelsize=11)
         ax.grid(alpha=0.3, linestyle='--', axis='y')
 
-    plt.suptitle(title, fontsize=14, fontweight='bold', y=1.02)
+    plt.suptitle(title, fontsize=18, fontweight='bold', y=1.02)
     plt.tight_layout()
 
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight', format='pdf')
 
     return fig, axes
 
@@ -242,10 +239,11 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
 
     # random classifier baseline
     ax1.plot([0, 1], [0, 1], 'k--', lw=1.5, alpha=0.6, label='Random (0.500)')
-    ax1.set_xlabel('False Positive Rate', fontweight='bold')
-    ax1.set_ylabel('True Positive Rate', fontweight='bold')
-    ax1.set_title('ROC Curves', fontweight='bold')
-    ax1.legend(loc='lower right')
+    ax1.set_xlabel('False Positive Rate', fontweight='bold', fontsize=14)
+    ax1.set_ylabel('True Positive Rate', fontweight='bold', fontsize=14)
+    ax1.set_title('ROC Curves', fontweight='bold', fontsize=16)
+    ax1.legend(loc='lower right', fontsize=12)
+    ax1.tick_params(axis='both', which='major', labelsize=11)
     ax1.grid(alpha=0.3, linestyle='--')
 
     # pr curves (right panel)
@@ -277,16 +275,17 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
 
     # random classifier baseline
     ax2.axhline(pos_ratio, color='k', linestyle='--', lw=1.5, alpha=0.6, label=f'Random ({pos_ratio:.3f})')
-    ax2.set_xlabel('Recall', fontweight='bold')
-    ax2.set_ylabel('Precision', fontweight='bold')
-    ax2.set_title('Precision-Recall Curves', fontweight='bold')
-    ax2.legend(loc='lower left')
+    ax2.set_xlabel('Recall', fontweight='bold', fontsize=14)
+    ax2.set_ylabel('Precision', fontweight='bold', fontsize=14)
+    ax2.set_title('Precision-Recall Curves', fontweight='bold', fontsize=16)
+    ax2.legend(loc='lower left', fontsize=12)
+    ax2.tick_params(axis='both', which='major', labelsize=11)
     ax2.grid(alpha=0.3, linestyle='--')
 
-    plt.suptitle(title, fontsize=14, fontweight='bold', y=1.02)
+    plt.suptitle(title, fontsize=18, fontweight='bold', y=1.02)
     plt.tight_layout()
 
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight', format='pdf')
 
     return fig, (ax1, ax2)

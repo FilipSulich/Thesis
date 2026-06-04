@@ -60,25 +60,26 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
         ax.set_xticks(range(1, len(pipelines) + 1))
         ax.set_xticklabels(pipelines, fontsize=11)
 
-        ax.set_xlabel('Pipeline', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Pipeline', fontsize=14, fontweight='bold')
         ax.set_ylabel(
             METRIC_LABELS.get(metric, metric),
-            fontsize=12,
+            fontsize=14,
             fontweight='bold'
         )
 
         ax.set_title(
             METRIC_LABELS.get(metric, metric),
-            fontsize=13,
+            fontsize=16,
             fontweight='bold'
         )
 
+        ax.tick_params(axis='both', which='major', labelsize=11)
         ax.grid(alpha=0.3, linestyle='--')
 
     plt.tight_layout()
 
-    plot_path = os.path.join(output_dir, 'pipeline_comparison_boxplots.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    plot_path = os.path.join(output_dir, 'pipeline_comparison_boxplots.pdf')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight', format='pdf')
 
     plt.close()
 
@@ -134,14 +135,14 @@ def plot_violinplot_comparisons(agg_df, metrics, output_dir):
             ax.scatter(i, median, color='white', s=25, zorder=3, edgecolors='#2C3E50', linewidths=1.5)
 
         ax.set_xticks(range(1, len(pipelines) + 1))
-        ax.set_xticklabels(pipelines, fontsize=10.5, color='#333333')
+        ax.set_xticklabels(pipelines, fontsize=11, color='#333333')
 
-        ax.set_xlabel('Pipeline', fontsize=11, fontweight='bold', labelpad=10, color='#222222')
-        ax.tick_params(axis='both', which='major', labelsize=10, labelcolor='#333333')
+        ax.set_xlabel('Pipeline', fontsize=14, fontweight='bold', labelpad=10, color='#222222')
+        ax.tick_params(axis='both', which='major', labelsize=11, labelcolor='#333333')
 
         ax.set_title(
             METRIC_LABELS.get(metric, metric),
-            fontsize=12,
+            fontsize=16,
             fontweight='bold',
             pad=14,
             color='#111111'
@@ -152,6 +153,6 @@ def plot_violinplot_comparisons(agg_df, metrics, output_dir):
 
     plt.tight_layout()
 
-    plot_path = os.path.join(output_dir, 'pipeline_comparison_violinplots.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    plot_path = os.path.join(output_dir, 'pipeline_comparison_violinplots.pdf')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight', format='pdf')
     plt.close()

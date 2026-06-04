@@ -1,9 +1,15 @@
+import os
+import sys
+import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from src.decomposition_strategy_validation import (
     ExperimentConfig,
     run_experiment,
 )
 
 
+np.random.seed(42)
 def main():
     """
     main function for running the decomposition strategy validation experiment
@@ -11,8 +17,8 @@ def main():
 
     # select the frequency placement condition by uncommenting the appriopiate line below:
 
-    # method = "HARMONIC"
-    method = "NON_HARMONIC"
+    method = "HARMONIC"
+    # method = "NON_HARMONIC"
 
     subband_freq = {}
 
@@ -46,7 +52,6 @@ def main():
     band_names = ['D1', 'D2', 'D3', 'D4', 'A4']
     pipeline_names = ['swt_recon', 'swt_direct', 'dwt_recon']
 
-    print("running experiment...")
     agg_df, stats_df = run_experiment(config=config,band_names=band_names,pipeline_names=pipeline_names,n_trials=100)
     print("experiment finished")
 
