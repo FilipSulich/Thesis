@@ -64,7 +64,7 @@ Experiments for selecting optimal wavelet function and decomposition strategy.
 - `urp_discrminability/` - Tests for URP discriminability using image texture and statistical features
   - `wavelet_evaluator.py` - Cross-validated AUC comparison across wavelets
   - `utrp_features.py` - Feature extraction from URPs
-  - `main.py` - Run 5-fold CV training for the discriminability analysis (note it can take a while) 
+  - `main.py` - Run 5-fold cross-validation training for the discriminability analysis (note it can take a while) 
 
 **Key files:**
 - `utils.py` - Subject grouping and effect size utilities
@@ -87,7 +87,7 @@ Validation of decomposition strategies using synthetic signals.
 
 ## Dataset
 
-**IMPORTANT:** The processed dataset is not included in this repository due to size constraints.
+**IMPORTANT:** The processed dataset is not included in this repository due to size constraints (it is more than 30 GB of data).
 
 **Download the dataset:**
 1. Download the URP data and model weights from Google Drive: **https://drive.google.com/drive/folders/1NplSsH6urf2LSVbM0s3QcqdQjDLAxCP7?usp=sharing**
@@ -141,31 +141,17 @@ cd src/CNN/ablation
 python ablation_study.py
 ```
 
-## Methodology
-
-This implementation of the multi-scale recurrence analysis pipeline follows these steps :
-
-1. **Wavelet Decomposition**: ECG signals are decomposed into frequency subbands (D2-D8) using Stationary Wavelet Transform (SWT) with db8 wavelet
-2. **Phase Space Reconstruction**: Each subband is embedded using parameters (tau from AMI, m from FNN)
-3. **Recurrence Plot Generation**: Unthresholded recurrence plots (URPs) are computed per wavelet scale using pyrqa
-4. **Multi-Scale CNN**: URPs from all subbands are processed by separate CNN branches with late feature-fusion and attention mechanisms to modulate the contribution of each scale
-5. **Classification**: Binary classification (NSR vs Pre-AF) using weighted cross-entropy loss
-
 ## Disclosure: Use of Generative AI
 
-Generative AI (Claude model Opus 4.6) was used to assist only with the following aspects of this project:
+Generative AI (Claude by Anthropic, model Opus 4.6) was used to assist with the following aspects of this project:
 
 **Code Documentation:**
-- Generation of docstrings for Python functions and classes
-- Formatting of documentation to maintain consistency across the codebase
+- Generation of documentation for functions and classes
 - Clarity improvements in code comments
 
 **Code Refactoring:**
 - Help with removing code redundancy and optimization
 - Suggestions for code organization and structure improvements
-
-**README file**
-- Structuring and formatting of this README.md file
 
 ## License
 MIT License
