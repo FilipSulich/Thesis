@@ -3,7 +3,7 @@ import numpy as np
 
 def pad_matrix(matrix, target_size):
     """
-    zero-pad or crop a square matrix to match the specified target size
+    zero-pad or crop a square matrix to match the specified target size (its just used as a safety check)
 
     Args:
         matrix (numpy.ndarray): input square matrix to be resized
@@ -20,7 +20,6 @@ def pad_matrix(matrix, target_size):
     if s > target_size:
         return matrix[:target_size, :target_size]
 
-    # pad with zeros if smaller
     padded = np.zeros((target_size, target_size), dtype=matrix.dtype)
     padded[:s, :s] = matrix
     return padded

@@ -7,15 +7,15 @@ from src.decomposition_strategy_validation import (
     ExperimentConfig,
     run_experiment,
 )
-
-
 np.random.seed(42)
+
+
 def main():
     """
     main function for running the decomposition strategy validation experiment
     """
 
-    # select the frequency placement condition by uncommenting the appriopiate line below:
+    #select the frequency placement condition by uncommenting the appriopiate line below:
 
     method = "HARMONIC"
     # method = "NON_HARMONIC"
@@ -39,7 +39,7 @@ def main():
             'D1': 61    # 32-64 Hz
         }
 
-    # below the experiment configuration is created with the specified parameters
+    #below the experiment configuration is created with the specified parameters
     config = ExperimentConfig(
         fs=128,
         n=1024,

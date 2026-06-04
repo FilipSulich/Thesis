@@ -26,7 +26,7 @@ NON_HARM_FREQS = {
 BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
 
 class LeakageTester:
-    """tests wavelets for frequency leakage across subbands using synthetic sinusoid signals"""
+    """tests wavelets for energy leakage across subbands using synthetic sinusoid signals"""
 
     def __init__(self, fs=128, n_samples=1280, level=4, output_dir=None):
         """
@@ -93,13 +93,13 @@ class LeakageTester:
 
     def compute_energy_ratio(self, confusion):
         """
-        computes diagonal energy ratio showing frequency isolation quality
+        computes diagonal energy ratio (DER/ER) showing frequency isolation quality
 
         Args:
             confusion (np.array): confusion matrix from compute_confusion_matrix
 
         Returns:
-            float: mean diagonal energy ratio (higher = better isolation)
+            float: mean energy ratio (higher = better isolation)
         """
         diagonal = np.diag(confusion)
         return float(np.mean(diagonal))

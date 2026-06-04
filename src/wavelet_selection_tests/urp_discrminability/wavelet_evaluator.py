@@ -18,15 +18,15 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from src.wavelet_selection_tests.urp_discrminability.urp_features import URPFeatures
 from src.wavelet_selection_tests.utils import get_subject_group
-
+from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
 CANDIDATE_WAVELETS = (
     [f'db{i}' for i in range(2, 9)] +
     [f'sym{i}' for i in range(2, 9)] +
     [f'coif{i}' for i in range(1, 4)]
 )
 SUBBAND_LEVELS = list(range(2, 9))  # D2-D8
-N_SWT_LEVELS = 10
-FS = 500
+N_SWT_LEVELS = 10 #decomposition levels
+FS = 500 #target sampling frequency of the ECG data (after resampling)
 
 class WaveletEvaluator:
     """evaluates wavelets for URP discriminability using logistic regression on texture features"""
@@ -61,7 +61,7 @@ class WaveletEvaluator:
 
     def _pad_signal(self, signal):
         """
-        pads signal to power-of-2 length required for SWT decomposition
+        pads signal to dyadic length required for SWT decomposition
 
         Args:
             signal (np.array): input signal array
@@ -112,8 +112,6 @@ class WaveletEvaluator:
         Returns:
             np.array: RGB URP image of shape (urp_size, urp_size, 3) normalized to [0,1]
         """
-        from src.recurrence_plot.recurrence_plot_generation import RecurrencePlotGenerator
-
         gen = RecurrencePlotGenerator(
             signal=signal,
             time_delay=tau,
@@ -122,13 +120,17 @@ class WaveletEvaluator:
         )
         rp = gen.compute_rp_unthresholded()
 
+        #min-max normalize
         d_max = rp.max()
         if d_max > 1e-9:
             rp = rp / d_max
 
+        #resize to 256 x 256 and fill the diagonal with 0s
         rp_r = cv2.resize(rp.astype(np.float32),(self.urp_size, self.urp_size),interpolation=cv2.INTER_LINEAR)
         np.fill_diagonal(rp_r, 0.0)
 
+
+        # color map JET encoding
         u8 = (rp_r * 255).astype(np.uint8)
         bgr = cv2.applyColorMap(u8, cv2.COLORMAP_JET)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0

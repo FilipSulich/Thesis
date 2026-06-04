@@ -80,14 +80,12 @@ class LeakageStats:
         groups = [df_cond[df_cond['wavelet'] == w]['DER'].values for w in wavelets]
 
         h_stat, p_value_kw = kruskal(*groups)
-        sig = '***' if p_value_kw < 0.001 else '**' if p_value_kw < 0.01 else '*' if p_value_kw < 0.05 else 'ns'
 
         kw_results = {
             'test': 'Kruskal-Wallis',
             'condition': condition,
             'H_statistic': float(h_stat),
             'p_value': float(p_value_kw),
-            'significance': sig
         }
         kw_path = self.output_dir / f'kruskal_wallis_{condition}.json'
         with open(kw_path, 'w') as f:
@@ -148,15 +146,8 @@ class LeakageStats:
         comparison_data = []
 
         for wavelet in all_wavelets:
-            try:
-                p_harm = dunn_harm.loc['db8', wavelet]
-            except:
-                p_harm = np.nan
-
-            try:
-                p_nonharm = dunn_nonharm.loc['db8', wavelet]
-            except:
-                p_nonharm = np.nan
+            p_harm = dunn_harm.loc['db8', wavelet]
+            p_nonharm = dunn_nonharm.loc['db8', wavelet]
 
             wav_harm = df[(df['wavelet'] == wavelet) & (df['condition'] == 'Harmonic')]['DER'].values
             wav_nonharm = df[(df['wavelet'] == wavelet) & (df['condition'] == 'Non-harmonic')]['DER'].values

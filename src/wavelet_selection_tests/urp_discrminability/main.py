@@ -13,15 +13,15 @@ from src.wavelet_selection_tests.urp_discrminability.wavelet_evaluator import Wa
 
 DATA_DIR = PROJECT_ROOT / 'data_container' / 'raw_data' / 'paf'
 PARAMS_JSON = PROJECT_ROOT / 'data_container' / 'raw_data' / 'tau_m_params.json'
-output_dir = PROJECT_ROOT / 'results' / 'urp_discrminability'
-output_dir.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR = PROJECT_ROOT / 'results' / 'urp_discrminability'
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # configuration parameters
 FS_ORIG = 128
 FS_TARGET = 500
 SEGMENT_SAMPLES = 5000
-N_SEGS_PER_REC = 5
+N_SEGS_PER_REC = 5 #here only 5 segments per record are used for computational tractability reasons (absolute best performance is not relevant here, just relative performance across wavelets)
 SUBBAND_NAMES = [f'D{i}' for i in range(2, 9)]
 
 
@@ -41,7 +41,7 @@ def load_ecg_segments():
     nsr_recs = [r for r in all_records if r.startswith('n')]
 
     def extract_segments(record_id, label):
-        """rxtract segments from one record.
+        """extract segments from one record.
         Args:
             record_id (str): record ID
             label (int): label (0=NSR, 1=Pre-AF)
@@ -50,11 +50,9 @@ def load_ecg_segments():
             rec = wfdb.rdrecord(str(DATA_DIR / record_id))
             raw = rec.p_signal[:, 0].astype(np.float64)
 
-            # resample to target fs
             n = int(len(raw) * FS_TARGET / FS_ORIG)
             sig = resample(raw, n).astype(np.float64)
 
-            # get evenly-spaced segments
             max_start = len(sig) - SEGMENT_SAMPLES
             if max_start <= 0:
                 return [], [], []

@@ -18,7 +18,6 @@ def main():
     main function to run the leakage analysis
     """
     print("running leakage tests...")
-
     tester = LeakageTester(fs=128, n_samples=1280, level=4, output_dir=output_dir)
     df = tester.run_all(
         wavelets=[
@@ -31,13 +30,10 @@ def main():
         ],
         n_trials=100
     )
-
     print("done")
-    #plots
     plotter = LeakagePlotter(output_dir)
     plotter.plot_der_comparison(df)
 
-    #stats
     stats = LeakageStats(output_dir)
     stats.save_all_stats(df)
     print(f"saving data to {output_dir}")

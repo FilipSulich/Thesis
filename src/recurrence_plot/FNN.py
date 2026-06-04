@@ -4,7 +4,7 @@ from sklearn.neighbors import NearestNeighbors
 
 
 class FNN:
-    """computes false nearest neighbors to determine optimal embedding dimension for phase space reconstruction"""
+    """computes false nearest neighbors (FNN) to determine optimal embedding dimension for phase space reconstruction"""
 
     def __init__(self, signal, tau, max_dim=15, r_tol=15.0, a_tol=2.0):
         """

@@ -90,7 +90,6 @@ class LeakagePlotter:
         ax.tick_params(axis='both', which='major', labelsize=11)
         ax.grid(alpha=0.3, linestyle='--')
 
-        # Legend
         legend_elements = [
             Patch(facecolor=colors['Harmonic'], alpha=0.35, edgecolor='black', label='Harmonic'),
             Patch(facecolor=colors['Non-harmonic'], alpha=0.35,edgecolor='black', label='Non-harmonic')
