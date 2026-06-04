@@ -16,7 +16,7 @@ from scipy.stats import friedmanchisquare, wilcoxon
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-from src.wavelet_selection_tests.urp_discrminability.utrp_features import URPFeatures
+from src.wavelet_selection_tests.urp_discrminability.urp_features import URPFeatures
 from src.wavelet_selection_tests.utils import get_subject_group
 
 CANDIDATE_WAVELETS = (
