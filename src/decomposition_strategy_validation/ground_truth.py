@@ -27,19 +27,15 @@ def generate_ground_truth(config, band_names):
     ground_truth_data = {}
     for band in band_names:
         freq = config.subband_freqs[band]
-        # generate and normalize pure sine
         pure_sine = generate_single_sine(config.n, config.fs, freq)
         pure_sine = min_max_normalize(pure_sine)
 
-        # estimate embedding parameters
         tau, m = estimate_embedding_params(pure_sine)
 
-        # compute distance matrix and epsilon
         dist_mat = compute_distance_matrix(pure_sine, tau, m)
         max_dist = dist_mat.max()
         epsilon = 0.1 * max_dist
 
-        # compute RQA metrics
         metrics = compute_rqa_metrics(pure_sine, tau, m, epsilon, config.output_dir)
 
         ground_truth[band] = {
@@ -81,7 +77,6 @@ def save_ground_truth(ground_truth, ground_truth_data, band_names, save_path):
         arrays[f'{band}_rp'] = rp
         arrays[f'{band}_dist'] = ground_truth_data[band]['distance_matrix']
         arrays[f'{band}_signal'] = ground_truth_data[band]['pure_sine']
-
     np.savez(npz_path, **arrays)
 
 

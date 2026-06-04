@@ -142,7 +142,7 @@ def plot_pr_curves(data_dict, colors=None, output_path=None, title='Precision-Re
 
 def plot_metric_box_plots(data_dict, metrics=None, colors=None, output_path=None, title='Model Comparison'):
     """
-    plots boxplots comparing specified metrics across multiple models
+    plots box plots comparing specified metrics across multiple models
 
     Args:
         data_dict (dict): mapping of model names to list of fold results
@@ -174,15 +174,12 @@ def plot_metric_box_plots(data_dict, metrics=None, colors=None, output_path=None
             labels.append(model_name)
             box_colors.append(colors.get(model_name, '#000000'))
 
-        # create boxplot
         bp = ax.boxplot(data, labels=labels, patch_artist=True, widths=0.6, showfliers=False)
 
-        # color boxes
         for patch, color in zip(bp['boxes'], box_colors):
             patch.set_facecolor(color)
             patch.set_alpha(0.6)
 
-        # scatter individual fold points
         for i, (values, color) in enumerate(zip(data, box_colors)):
             x_jitter = np.random.normal(i + 1, 0.04, len(values))
             ax.scatter(x_jitter, values, color=color, s=50, alpha=0.9, zorder=3)
@@ -273,7 +270,6 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
         ax2.plot(mean_recall, mean_precision, color=color, lw=2.5, label=f'{model_name} ({mean_auprc:.3f} ± {std_auprc:.3f})')
         ax2.fill_between(mean_recall, np.maximum(mean_precision - std_precision, 0), np.minimum(mean_precision + std_precision, 1), color=color, alpha=0.2)
 
-    # random classifier baseline
     ax2.axhline(pos_ratio, color='k', linestyle='--', lw=1.5, alpha=0.6, label=f'Random ({pos_ratio:.3f})')
     ax2.set_xlabel('Recall', fontweight='bold', fontsize=14)
     ax2.set_ylabel('Precision', fontweight='bold', fontsize=14)

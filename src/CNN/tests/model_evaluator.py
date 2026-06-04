@@ -7,7 +7,7 @@ from src.CNN.models.multi_scale_cnn import MultiScaleCNN
 from src.CNN.utils.datasets import CombinedH5Dataset
 from src.CNN.utils.evaluation import evaluate_model_folds
 from src.CNN.utils.statistics import compare_models
-from src.CNN.utils.plotting import plot_roc_and_pr_combined, plot_metric_box_plots
+from src.CNN.utils.plotting import plot_roc_and_pr_combined
 from src.CNN.utils.utils import DEVICE
 import json
 

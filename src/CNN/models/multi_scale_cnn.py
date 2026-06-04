@@ -38,9 +38,7 @@ def convolutional_backbone(in_ch: int) -> nn.Sequential:
 
 class MultiScaleCNN(nn.Module):
     """
-    Multi-scale CNN with late feature fusion using learned attention weights for subband fusion.
-
-    This architecture processes multiple frequency subbands through independent convolutional backbones, then uses an attention mechanism to learn optimal weights for combining subband features before classification.
+    multi-scale CNN with late feature fusion using learned attention weights for subband fusion.
     """
 
     def __init__(self, n_subbands: int = 7, dropout: float = 0.5):
@@ -95,7 +93,6 @@ class MultiScaleCNN(nn.Module):
             feat = self.branches[i](x[:, i * 3:(i + 1) * 3, :, :])  # (B, 64)
             branch_feats.append(feat)
 
-        # stack: (B, n_subbands, 64)
         stacked = torch.stack(branch_feats, dim=1)
 
         # use learned attention weights

@@ -22,7 +22,7 @@ class ExperimentConfig:
 
     # wavelet parameters
     level: int = 4          # decomposition level
-    wavelet: str = 'db4'    # wavelet type
+    wavelet: str = 'db4'    # wavelet fnction
 
     subband_freqs: Dict[str, float] = None
 
@@ -38,7 +38,6 @@ class ExperimentConfig:
                 'D1': 48
             }
 
-        # default output directory
         if self.output_dir is None:
             self.output_dir = 'results'
 

@@ -39,23 +39,18 @@ from src.CNN.utils.plotting import (
 )
 
 __all__ = [
-    # utils
     'get_device',
     'get_subject_group',
     'set_seed',
     'DEVICE',
-    # datasets
     'CombinedH5Dataset',
-    # models
     'FullBandCNN',
     'MultiScaleCNN',
-    # evaluation
     'get_predictions',
     'get_attention_weights',
     'compute_metrics',
     'find_optimal_threshold_youden',
     'evaluate_model_folds',
-    # statistics
     'compute_rosenthal_r',
     'friedman_test',
     'wilcoxon_pairwise',
@@ -63,7 +58,6 @@ __all__ = [
     'pairwise_wilcoxon_with_correction',
     'compute_summary_stats',
     'compare_models',
-    # plotting
     'plot_roc_curves',
     'plot_pr_curves',
     'plot_metric_box_plots',

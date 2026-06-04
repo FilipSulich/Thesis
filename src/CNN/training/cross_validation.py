@@ -90,7 +90,7 @@ class CrossValidator:
             return 'multi'
 
     def _create_model(self) -> nn.Module:
-        """create model based on configuration."""
+        """create model based on configuration"""
         if self.model_type == 'single':
             return FullBandCNN(dropout=self.dropout).to(self.device)
         else:
@@ -98,7 +98,7 @@ class CrossValidator:
             return MultiScaleCNN(n_subbands=n_subbands, dropout=self.dropout).to(self.device)
 
     def _train_epoch(self, model, loader, criterion, optimizer):
-        """train for one epoch."""
+        """train for one epoch"""
         model.train()
         total_loss, correct, n = 0.0, 0, 0
 
@@ -119,7 +119,7 @@ class CrossValidator:
 
     @torch.no_grad()
     def _eval_epoch(self, model, loader, criterion):
-        """evaluate for one epoch."""
+        """evaluate for one epoch"""
         model.eval()
         total_loss, correct, n = 0.0, 0, 0
         all_probs, all_labels = [], []
@@ -167,7 +167,7 @@ class CrossValidator:
 
     @torch.no_grad()
     def _get_attention_weights(self, model, loader):
-        """extract attention weights for multi-scale models."""
+        """extract attention weights for multi-scale models"""
         if self.model_type == 'single':
             return None
 

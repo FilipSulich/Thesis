@@ -4,7 +4,7 @@ from src.CNN.models.multi_scale_cnn import convolutional_backbone
 
 class FullBandCNN(nn.Module):
     """
-    baseline CNN model for single full-band URP classification using the same backbone as MultiScaleCNN
+    baseline CNN model for full-band URP classification using the same backbone as MultiScaleCNN
     """
 
     def __init__(self, dropout: float = 0.5):
@@ -16,7 +16,6 @@ class FullBandCNN(nn.Module):
         """
         super().__init__()
 
-        # Use same backbone as MultiScaleCNN branches
         self.encoder = convolutional_backbone(in_ch=3)
 
         self.classifier = nn.Sequential(
