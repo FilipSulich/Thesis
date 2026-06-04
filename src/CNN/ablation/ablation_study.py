@@ -7,7 +7,7 @@ from src.CNN.models.multi_scale_cnn import MultiScaleCNN
 from src.CNN.utils.datasets import CombinedH5Dataset
 from src.CNN.utils.evaluation import evaluate_model_folds
 from src.CNN.utils.statistics import compare_models
-from src.CNN.utils.plotting import plot_metric_box_plots
+from src.CNN.utils.plotting import plot_metric_box_plots, plot_roc_and_pr_combined
 from src.CNN.utils.utils import DEVICE
 
 DATA_ROOT = Path(__file__).parent.parent.parent.parent
@@ -58,11 +58,10 @@ def main():
         alpha=0.05
     )
 
-    plot_metric_box_plots(
+    plot_roc_and_pr_combined(
         results,
-        metrics=['auc', 'auprc'],
-        output_path=OUTPUT_DIR / 'ablation_boxplots.png',
-        title='Ablation Study Comparison'
+        output_path=OUTPUT_DIR / 'roc_pr_comparison.png',
+        title='Ablation Study Comparison across 10-fold CV\n ROC and Precision-Recall Curves'
     )
 
     output_json = OUTPUT_DIR / 'ablation_comparison_stats.json'

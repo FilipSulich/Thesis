@@ -69,14 +69,6 @@ def main():
         title='Model Comparison across 10-fold CV\n ROC and Precision-Recall Curves'
     )
 
-    plot_metric_box_plots(
-        results,
-        metrics=['auc', 'auprc'],
-        output_path=OUTPUT_DIR / 'metric_boxplots.png',
-        title='Model Performance Comparison across 10-fold CV'
-    )
-
-
     with open(output_json, 'w') as f:
         json.dump(stats, f, indent=2)
     print(f"analysis done and results saved to {output_json}")

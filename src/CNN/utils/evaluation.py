@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from sklearn.metrics import (
     roc_curve, auc, average_precision_score,
-    accuracy_score, f1_score, confusion_matrix
+    confusion_matrix
 )
 from sklearn.model_selection import GroupKFold
 
@@ -78,12 +78,10 @@ def compute_metrics(labels, probs, threshold=0.5):
     """
     preds = (probs >= threshold).astype(int)
 
-    # roc and auprc
     fpr, tpr, _ = roc_curve(labels, probs)
     auc_roc = auc(fpr, tpr)
     auprc = average_precision_score(labels, probs)
 
-    # confusion matrix
     tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
     sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
@@ -151,7 +149,7 @@ def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, dev
             else:
                 continue
 
-        print(f"\nevaluating fold {fold_idx} ({checkpoint_path.name})...")
+        print(f"evaluating fold {fold_idx}...")
 
         if 'val_indices' in checkpoint:
             va_idx = checkpoint['val_indices']
@@ -189,7 +187,7 @@ def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, dev
         if 'val_record_ids' in checkpoint:
             metrics['val_record_ids'] = checkpoint['val_record_ids']
 
-        print(f"AUC: {metrics['auc']:.4f}, AUPRC: {metrics['auprc']:.4f} Sensitivity: {metrics['sensitivity']:.4f}, Specificity: {metrics['specificity']:.4f}")
+        # print(f"AUC: {metrics['auc']:.4f}, AUPRC: {metrics['auprc']:.4f} Sensitivity: {metrics['sensitivity']:.4f}, Specificity: {metrics['specificity']:.4f}")
         fold_results.append(metrics)
 
     return fold_results
