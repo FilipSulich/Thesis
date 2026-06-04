@@ -137,7 +137,7 @@ class CrossValidator:
             correct += (logits.argmax(1) == y).sum().item()
             n += len(y)
 
-        # Compute metrics
+        # compute metrics
         all_probs = np.array(all_probs)
         all_labels = np.array(all_labels)
 
@@ -145,7 +145,7 @@ class CrossValidator:
         auc_roc = sklearn_auc(fpr, tpr)
         auprc = average_precision_score(all_labels, all_probs)
 
-        # Use Youden's index for threshold
+        # use Youden's Index for threshold
         youden_idx = np.argmax(tpr - fpr)
         threshold = _[youden_idx] if len(_) > youden_idx else 0.5
         preds = (all_probs >= threshold).astype(int)
@@ -187,7 +187,7 @@ class CrossValidator:
         run complete cross-validation training.
 
         Returns:
-            Dictionary with aggregated results across folds
+            dictionary with aggregated results across folds
         """
         print(f"Model: {self.model_type}")
         if self.model_type == 'multi':
@@ -199,7 +199,6 @@ class CrossValidator:
         dataset = FullDataset(
             self.h5_dir,
             mode=dataset_mode,
-            cache=True,
             subband_keys=self.subband_keys
         )
 
@@ -214,7 +213,7 @@ class CrossValidator:
         fold_attn_weights = []
 
         for fold, (tr_idx, va_idx) in enumerate(gkf.split(dummy_X, dataset.labels, groups), start=1):
-            print(f"Fold {fold}/{self.n_folds}")
+            print(f"fold {fold}/{self.n_folds}")
 
             tr_groups = groups[tr_idx]
             unique_tr_groups = np.unique(tr_groups)
@@ -229,21 +228,21 @@ class CrossValidator:
             tr_loader = DataLoader(tr_subset, batch_size=self.batch_size, shuffle=True, num_workers=0)
             va_loader = DataLoader(va_subset, batch_size=self.batch_size, shuffle=False, num_workers=0)
 
-            # Initialize model
+            # initialize model
             set_seed(self.seed + fold)
             model = self._create_model()
 
             if fold == 1:
-                print(f"Model parameters: {model.count_params():,}\n")
+                print(f"model parameters: {model.count_params():,}\n")
 
-            # Optimizer and scheduler
+            # optimizer and scheduler
             criterion = nn.CrossEntropyLoss(weight=class_weights)
             optimizer = optim.Adam(model.parameters(), lr=self.lr, weight_decay=1e-4)
             scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, mode='max', factor=0.5, patience=self.scheduler_patience
             )
 
-            # Training loop
+            # training loop
             best_auc = 0.0
             patience_counter = 0
 
@@ -253,12 +252,11 @@ class CrossValidator:
 
                 scheduler.step(va_metrics['auc_roc'])
 
-                # Early stopping and checkpointing
+                # early stopping and checkpointing
                 if va_metrics['auc_roc'] > best_auc:
                     best_auc = va_metrics['auc_roc']
                     patience_counter = 0
 
-                    # Save checkpoint
                     checkpoint = {
                         'fold': fold,
                         'epoch': epoch,
@@ -279,19 +277,19 @@ class CrossValidator:
                     patience_counter += 1
 
                 if (epoch % 10 == 0) or (epoch == 1):
-                    print(f"Epoch {epoch:3d}: train_loss={tr_loss:.4f} train_acc={tr_acc:.4f} val_loss={va_loss:.4f} val_auc={va_metrics['auc_roc']:.4f} (best={best_auc:.4f})")
+                    print(f"epoch {epoch:3d}: train_loss={tr_loss:.4f} train_acc={tr_acc:.4f} val_loss={va_loss:.4f} val_auc={va_metrics['auc_roc']:.4f} (best={best_auc:.4f})")
 
                 if patience_counter >= self.patience:
-                    print(f"Early stopping at epoch {epoch}")
+                    print(f"early stopping at epoch {epoch}")
                     break
 
-            # Load best model and collect final results
+            # load best model and save final results
             checkpoint = torch.load(self.output_dir / f'fold_{fold}_best.pt', map_location=self.device)
             model.load_state_dict(checkpoint['state_dict'])
 
             _, _, final_metrics, final_probs, final_labels = self._eval_epoch(model, va_loader, criterion)
 
-            # Get attention weights for multi-scale models
+            # get attention weights for multi-scale models
             if self.model_type == 'multi':
                 attn_weights = self._get_attention_weights(model, va_loader)
                 fold_attn_weights.append(attn_weights.tolist())
@@ -300,13 +298,12 @@ class CrossValidator:
             fold_probs.append(final_probs)
             fold_labels.append(final_labels)
 
-            print(f"\nFold {fold} final results:")
+            print(f"\nfold {fold} final results:")
             print(f"AUC: {final_metrics['auc_roc']:.4f}")
             print(f"AUPRC: {final_metrics['auprc']:.4f}")
-            print(f"Sensitivity: {final_metrics['sensitivity']:.4f}")
-            print(f"Specificity: {final_metrics['specificity']:.4f}")
+            print(f"sensitivity: {final_metrics['sensitivity']:.4f}")
+            print(f"specificity: {final_metrics['specificity']:.4f}")
 
-        # Aggregate results
         def aggregate(fold_results):
             keys = fold_results[0].keys()
             return {

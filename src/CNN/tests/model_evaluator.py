@@ -7,7 +7,7 @@ from src.CNN.models.multi_scale_cnn import MultiScaleCNN
 from src.CNN.utils.datasets import CombinedH5Dataset
 from src.CNN.utils.evaluation import evaluate_model_folds
 from src.CNN.utils.statistics import compare_models
-from src.CNN.utils.plotting import plot_roc_and_pr_combined, plot_metric_boxplots
+from src.CNN.utils.plotting import plot_roc_and_pr_combined, plot_metric_box_plots
 from src.CNN.utils.utils import DEVICE
 import json
 
@@ -46,11 +46,17 @@ def main():
 
     results = {}
 
-    print("evaluating models...")
+
+    print("\nevaluating the full-band model... ")
     results['Full-band'] = evaluate_model_folds(model_class=FullBandCNN, model_params={'dropout': 0.5}, checkpoint_dir=RESULTS_SINGLE, dataset=dataset_single, device=DEVICE, batch_size=BATCH_SIZE)
+
+    print("\nevaluating the multi-scale model... ")
     results['Multi-scale'] = evaluate_model_folds(model_class=MultiScaleCNN,model_params={'n_subbands': 7, 'dropout': 0.5}, checkpoint_dir=RESULTS_MULTI, dataset=dataset_multi, device=DEVICE, batch_size=BATCH_SIZE)
+
+    print("\nevaluating the multi-scale denoised model... ")
     results['Multi-scale denoised'] = evaluate_model_folds(model_class=MultiScaleCNN, model_params={'n_subbands': 7, 'dropout': 0.5}, checkpoint_dir=RESULTS_MULTI_DENOISED, dataset=dataset_multi_denoised, device=DEVICE, batch_size=BATCH_SIZE)
-    print("models evaluated")
+
+    print("models successfully evaluated")
 
     stats = compare_models(
         results,
@@ -63,7 +69,7 @@ def main():
         title='Model Comparison across 10-fold CV\n ROC and Precision-Recall Curves'
     )
 
-    plot_metric_boxplots(
+    plot_metric_box_plots(
         results,
         metrics=['auc', 'auprc'],
         output_path=OUTPUT_DIR / 'metric_boxplots.png',

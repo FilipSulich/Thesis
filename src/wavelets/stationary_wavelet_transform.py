@@ -3,7 +3,7 @@ import numpy as np
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from wavelets.wavelet_transform import WaveletTransform
+from src.wavelets.wavelet_transform import WaveletTransform
 
 
 class SWT(WaveletTransform):

@@ -55,8 +55,6 @@ class WaveletEvaluator:
         self.n_cv_splits = n_cv_splits
         self.results_dir = Path(results_dir) if results_dir else Path('wavelet_selection')
         self.results_dir.mkdir(parents=True, exist_ok=True)
-
-        # Padding for SWT (needs power of 2 length)
         self.pad_samples = math.ceil(signals.shape[1] / (2 ** N_SWT_LEVELS)) * (2 ** N_SWT_LEVELS)
 
         self.results = {}
@@ -125,20 +123,13 @@ class WaveletEvaluator:
         )
         rp = gen.compute_rp_unthresholded()
 
-        # Normalize
         d_max = rp.max()
         if d_max > 1e-9:
             rp = rp / d_max
 
-        # Resize
-        rp_r = cv2.resize(
-            rp.astype(np.float32),
-            (self.urp_size, self.urp_size),
-            interpolation=cv2.INTER_LINEAR
-        )
+        rp_r = cv2.resize(rp.astype(np.float32),(self.urp_size, self.urp_size),interpolation=cv2.INTER_LINEAR)
         np.fill_diagonal(rp_r, 0.0)
 
-        # Apply colormap
         u8 = (rp_r * 255).astype(np.uint8)
         bgr = cv2.applyColorMap(u8, cv2.COLORMAP_JET)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -161,29 +152,14 @@ class WaveletEvaluator:
         m = self.embedding_params[name]['m']
 
         X_list, y_list, rec_list = [], [], []
-        n_failed = 0
-        failure_reasons = {'constant': 0, 'non_finite': 0, 'exception': 0}
-
         for sig, label, rec_id in zip(self.signals, self.labels, self.record_ids):
             try:
                 pad = self._pad_signal(sig)
                 sub = self._extract_subband(pad, wavelet, level)
-
-                sub_std = np.std(sub)
-                if sub_std < 1e-9:  # skip constant signals
-                    n_failed += 1
-                    failure_reasons['constant'] += 1
-                    if failure_reasons['constant'] <= 1:  # Debug first constant signal
-                        sig_std = np.std(sig)
-                        print(f"\n      Constant subband for {rec_id}: orig_std={sig_std:.2e}, sub_std={sub_std:.2e}, sub_range=[{sub.min():.2e}, {sub.max():.2e}]", end="")
-                    continue
-
                 urp = self._signal_to_urp(sub, tau, m)
                 feat = URPFeatures.extract(urp)
 
                 if not np.all(np.isfinite(feat)):
-                    n_failed += 1
-                    failure_reasons['non_finite'] += 1
                     continue
 
                 X_list.append(feat)
@@ -191,15 +167,7 @@ class WaveletEvaluator:
                 rec_list.append(rec_id)
 
             except Exception as e:
-                n_failed += 1
-                failure_reasons['exception'] += 1
-                if n_failed <= 3:  # Only print first 3 exceptions
-                    print(f"\n    Error processing {rec_id}: {type(e).__name__}: {e}")
                 continue
-
-        if n_failed > 0:
-            reasons = ', '.join([f"{k}={v}" for k, v in failure_reasons.items() if v > 0])
-            print(f" [{n_failed} failed: {reasons}]", end="")
 
         return np.array(X_list, dtype=np.float32), np.array(y_list), rec_list
 
@@ -215,11 +183,7 @@ class WaveletEvaluator:
         Returns:
             dict: cross-validation results with mean, std, and fold-wise AUC scores
         """
-        clf = make_pipeline(
-            StandardScaler(),
-            LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced')
-        )
-
+        clf = make_pipeline(StandardScaler(),LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced'))
         groups = np.array([get_subject_group(r) for r in record_ids])
         cv = GroupKFold(n_splits=self.n_cv_splits)
         scores = []
@@ -246,7 +210,7 @@ class WaveletEvaluator:
         Returns:
             dict: summary results with median, mean, min, max AUC and per-subband details
         """
-        print(f"\n  Wavelet: {wavelet}")
+        print(f"wavelet: {wavelet}")
         subband_results = {}
 
         for level in SUBBAND_LEVELS:
@@ -259,7 +223,7 @@ class WaveletEvaluator:
                 continue
 
             scores = self._cross_validate(X, y, rec_ids)
-            print(f" AUC={scores['mean']:.4f}±{scores['std']:.4f}")
+            print(f" AUC={scores['mean']:.4f}")
             subband_results[name] = scores
 
         valid_means = [v['mean'] for v in subband_results.values() if v is not None]
@@ -279,8 +243,6 @@ class WaveletEvaluator:
                 'max_auc': float(np.max(valid_means)),
                 'per_subband': subband_results,
             }
-            print(f"  Summary: median_AUC={summary['median_auc']:.4f}, mean_AUC={summary['mean_auc']:.4f}")
-
         self.results[wavelet] = summary
         return summary
 
@@ -319,9 +281,6 @@ class WaveletEvaluator:
         """
         perform friedman test and pairwise wilcoxon tests for each subband.
 
-        tests whether there are significant differences in AUC scores across wavelets
-        for each subband (D2-D8).
-
         args:
             alpha: significance level (default 0.05)
 
@@ -334,7 +293,6 @@ class WaveletEvaluator:
         for level in SUBBAND_LEVELS:
             name = f'D{level}'
 
-            # collect fold-wise AUC scores for each wavelet
             wavelet_scores = {}
             for wavelet, res in self.results.items():
                 if res['per_subband'][name] is not None:
@@ -344,7 +302,6 @@ class WaveletEvaluator:
                 stats_results[name] = None
                 continue
 
-            # friedman test
             groups = list(wavelet_scores.values())
             stat, p_value = friedmanchisquare(*groups)
 
@@ -385,7 +342,6 @@ class WaveletEvaluator:
                 comp['adj_alpha'] = adj_alpha
                 comp['significant_corrected'] = comp['p_value'] < adj_alpha
 
-                # if not significant, all remaining are not significant
                 if not comp['significant_corrected']:
                     for j in range(idx + 1, len(comparisons)):
                         comparisons[j]['adj_alpha'] = alpha / (n_comparisons - j)
@@ -411,7 +367,6 @@ class WaveletEvaluator:
         path = self.results_dir / 'wavelet_selection_results.json'
         with open(path, 'w') as f:
             json.dump(self.results, f, indent=2)
-        print(f"\nResults saved -> {path}")
 
     def save_statistical_tests(self, stats_results):
         """
@@ -426,7 +381,6 @@ class WaveletEvaluator:
         path = self.results_dir / 'wavelet_statistical_tests.json'
         with open(path, 'w') as f:
             json.dump(stats_results, f, indent=2)
-        print(f"Statistical tests saved -> {path}")
 
     @staticmethod
     def perform_statistical_tests_from_json(json_path, alpha=0.05, output_path=None):
@@ -445,7 +399,6 @@ class WaveletEvaluator:
         """
         json_path = Path(json_path)
 
-        # load existing results
         with open(json_path) as f:
             results = json.load(f)
 
@@ -454,7 +407,6 @@ class WaveletEvaluator:
         wavelet_summary = {}
 
         for wavelet, res in results.items():
-            # collect fold-wise AUC for all subbands
             n_folds = None
             subband_fold_aucs = {}
 
@@ -469,17 +421,14 @@ class WaveletEvaluator:
             if not subband_fold_aucs:
                 continue
 
-            # compute median across subbands for each fold
             median_aucs = []
             for fold_idx in range(n_folds):
-                fold_values = [subband_fold_aucs[name][fold_idx]
-                              for name in subband_fold_aucs.keys()]
+                fold_values = [subband_fold_aucs[name][fold_idx] for name in subband_fold_aucs.keys()]
                 median_aucs.append(np.median(fold_values))
 
             median_aucs = np.array(median_aucs)
             wavelet_median_scores[wavelet] = median_aucs
 
-            # compute summary statistics
             wavelet_summary[wavelet] = {
                 'median': float(np.median(median_aucs)),
                 'mean': float(np.mean(median_aucs)),
@@ -540,7 +489,6 @@ class WaveletEvaluator:
             comp['adj_alpha'] = adj_alpha
             comp['significant_corrected'] = comp['p_value'] < adj_alpha
 
-            # if not significant, all remaining are not significant
             if not comp['significant_corrected']:
                 for j in range(idx + 1, len(comparisons)):
                     comparisons[j]['adj_alpha'] = alpha / (n_comparisons - j)
@@ -549,7 +497,6 @@ class WaveletEvaluator:
 
         sig_comparisons = [c for c in comparisons if c['significant_corrected']]
 
-        # prepare final results
         stats_results = {
             'summary_statistics': wavelet_summary,
             'ranking': [{'rank': i+1, 'wavelet': w, 'median_auc': s['median']} for i, (w, s) in enumerate(ranked)],

@@ -1,5 +1,3 @@
-"""plotting functions for pipeline comparison visualization."""
-
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,7 +20,7 @@ METRIC_LABELS = {
 
 def plot_boxplot_comparisons(agg_df, metrics, output_dir):
     """
-    generate box plots comparing pipeline performance across multiple metrics with consistent styling
+    generate box plots comparing pipeline performance across multiple metrics
 
     Args:
         agg_df (pandas.DataFrame): aggregated results dataframe with columns ['trial', 'pipeline', metric1, metric2, ...]
@@ -87,7 +85,7 @@ def plot_boxplot_comparisons(agg_df, metrics, output_dir):
 
 def plot_violinplot_comparisons(agg_df, metrics, output_dir):
     """
-    generate violin plots showing distribution of pipeline performance across multiple metrics with enhanced visualization
+    generate violin plots showing distribution of pipeline performance across multiple metricss
 
     Args:
         agg_df (pandas.DataFrame): aggregated results dataframe with columns ['trial', 'pipeline', metric1, metric2, ...]

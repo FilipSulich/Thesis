@@ -1,5 +1,3 @@
-"""signal generation functions."""
-
 import numpy as np
 
 
@@ -27,7 +25,7 @@ def generate_composite_sine(n, fs, freq_dict):
 
 def generate_single_sine(n, fs, freq):
     """
-    generate single sinusoid at specified frequency with random phase
+    generate single sinusoid at specified frequency with a random phase
 
     Args:
         n (int): signal length in samples

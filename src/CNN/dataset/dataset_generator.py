@@ -138,7 +138,7 @@ def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE):
             rp = rp / d_max
 
         # resize and apply colormap
-        rp_r = cv2.resize(rp.astype(np.float32), (size, size), interpolation=cv2.INTER_AREA)
+        rp_r = cv2.resize(rp.astype(np.float32), (size, size), interpolation=cv2.INTER_LINEAR)
         np.fill_diagonal(rp_r, 0.0)
 
         u8 = (rp_r * 255).astype(np.uint8)
@@ -152,10 +152,10 @@ def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE):
 
 def build_subject_groups(nsr_records: List[str], preaf_records: List[str]):
     """
-    group paired recordings by patient
+    group paired recordings by subject
 
     NSR:   (n01, n01c, n02, n02c) → one subject group
-    PreAF: (p01, p02)  → one subject group (paired odd/even)
+    Pre-AF: (p01, p02)  → one subject group (paired odd/even)
 
     returns:
         list of (group_id, record_ids, label)
@@ -164,13 +164,13 @@ def build_subject_groups(nsr_records: List[str], preaf_records: List[str]):
     preaf_set = set(preaf_records)
     subjects = []
 
-    # NSR patients: n01, n01c, n02, n02c are from same patient
+    # NSR subjects: n01, n01c, n02, n02c are from same patient
     for i in range(1, 51, 2):
         recs = [r for r in [f'n{i:02d}', f'n{i:02d}c', f'n{i+1:02d}', f'n{i+1:02d}c'] if r in nsr_set]
         if recs:
             subjects.append((f'nsr_{i:02d}', recs, 0))
 
-    # PreAF patients: odd and even recordings are paired (p01-p02, p03-p04, ...)
+    # Pre-AF subjects: odd and even recordings are paired (p01-p02, p03-p04, ...)
     for i in range(1, 50, 2):
         recs = [r for r in [f'p{i:02d}', f'p{i+1:02d}'] if r in preaf_set]
         if recs:
@@ -299,7 +299,7 @@ class DatasetGenerator:
                 for level in SUBBAND_LEVELS:
                     name = f'D{level}'
 
-                    # 3 used as fallback paramater values here
+                    # 3 used as fallback parameter values here
                     tau = subband_tau.get(name, 3)
                     m = subband_m.get(name, 3)
 

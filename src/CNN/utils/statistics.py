@@ -18,7 +18,6 @@ def compute_rosenthal_r(x, y):
     r = z_score / np.sqrt(n)
     return float(r)
 
-
 def friedman_test(data_dict, metric='auc'):
     """
     performs friedman test to compare metric values across multiple model groups
@@ -48,7 +47,6 @@ def friedman_test(data_dict, metric='auc'):
         'groups': group_names
     }
 
-
 def wilcoxon_pairwise(group1, group2, metric='auc'):
     """
     performs wilcoxon signed-rank test between two model groups
@@ -74,7 +72,6 @@ def wilcoxon_pairwise(group1, group2, metric='auc'):
         'effect_size': effect_size,
         'significant': bool(result.pvalue < 0.05)
     }
-
 
 def holm_bonferroni_correction(comparisons, alpha=0.05):
     """
@@ -102,7 +99,6 @@ def holm_bonferroni_correction(comparisons, alpha=0.05):
             break
 
     return sorted_comps
-
 
 def pairwise_wilcoxon_with_correction(data_dict, metric='auc', alpha=0.05):
     """
@@ -150,10 +146,9 @@ def compute_summary_stats(fold_results, metric='auc'):
         'values': values
     }
 
-
-def compare_models(data_dict, metrics=['auc', 'auprc'], alpha=0.05):
+def compare_models(data_dict, metrics=None, alpha=0.05):
     """
-    performs comprehensive statistical comparison of multiple models across specified metrics
+    performs statistical comparison of multiple models across specified metrics
 
     Args:
         data_dict (dict): mapping of model names to list of fold results
@@ -163,6 +158,8 @@ def compare_models(data_dict, metrics=['auc', 'auprc'], alpha=0.05):
     Returns:
         dict: complete statistical analysis with summary stats, friedman results, and pairwise comparisons
     """
+    if metrics is None:
+        metrics = ['auc', 'auprc']
     for model_name, fold_results in data_dict.items():
         if not fold_results:
             raise ValueError(f"model {model_name} has no fold results")

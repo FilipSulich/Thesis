@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 
 class H5Dataset(Dataset):
     """
-    extracts URP data from HDF5 files into raw NumPy matrices for PyTorch consumption
+    extracts URP data from HDF5 files into raw NumPy matrices
     """
 
     def __init__(self, h5_path: Path, mode='multi', subband_keys=None):
@@ -26,8 +26,7 @@ class H5Dataset(Dataset):
         with h5py.File(h5_path, 'r') as f:
             meta_group = f.get('metadata', f)
             self.labels = meta_group['labels'][:].astype(np.int64)
-            self.record_ids = np.array([r.decode() if isinstance(r, bytes) else r
-                                       for r in meta_group['record_ids'][:]])
+            self.record_ids = np.array([r.decode() if isinstance(r, bytes) else r for r in meta_group['record_ids'][:]])
             self.n_samples = len(self.labels)
 
             if mode == 'single':

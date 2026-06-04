@@ -1,5 +1,3 @@
-"""embedding parameter estimation using AMI and FNN."""
-
 from src.recurrence_plot.AMI import AMI
 from src.recurrence_plot.FNN import FNN
 

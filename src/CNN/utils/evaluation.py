@@ -66,7 +66,7 @@ def get_attention_weights(model, loader, device):
 
 def compute_metrics(labels, probs, threshold=0.5):
     """
-    computes comprehensive classification metrics including AUC, AUPRC, sensitivity, and specificity
+    computes classification metrics: AUC, AUPRC, sensitivity, and specificity
 
     Args:
         labels (np.ndarray): true binary labels
@@ -151,7 +151,7 @@ def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, dev
             else:
                 continue
 
-        print(f"\nEvaluating Fold {fold_idx} ({checkpoint_path.name})...")
+        print(f"\nevaluating fold {fold_idx} ({checkpoint_path.name})...")
 
         if 'val_indices' in checkpoint:
             va_idx = checkpoint['val_indices']

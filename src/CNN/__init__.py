@@ -33,7 +33,7 @@ from src.CNN.utils.statistics import (
 from src.CNN.utils.plotting import (
     plot_roc_curves,
     plot_pr_curves,
-    plot_metric_boxplots,
+    plot_metric_box_plots,
     plot_roc_and_pr_combined,
     DEFAULT_COLORS
 )
@@ -66,7 +66,7 @@ __all__ = [
     # plotting
     'plot_roc_curves',
     'plot_pr_curves',
-    'plot_metric_boxplots',
+    'plot_metric_box_plots',
     'plot_roc_and_pr_combined',
     'DEFAULT_COLORS',
 ]

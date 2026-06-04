@@ -28,7 +28,7 @@ def convolutional_backbone(in_ch: int) -> nn.Sequential:
         nn.BatchNorm2d(64), nn.ReLU(inplace=True),
         nn.MaxPool2d(2),
 
-        # Block 4: 32 ->  32 (no pooling)
+        # Block 4: 32 (no pooling)
         nn.Conv2d(64, 64, kernel_size=3, padding=1, bias=False),
         nn.BatchNorm2d(64), nn.ReLU(inplace=True),
 
@@ -38,7 +38,7 @@ def convolutional_backbone(in_ch: int) -> nn.Sequential:
 
 class MultiScaleCNN(nn.Module):
     """
-    multi-scale CNN with late feature fusion using learned attention weights for subband combination.
+    Multi-scale CNN with late feature fusion using learned attention weights for subband fusion.
 
     This architecture processes multiple frequency subbands through independent convolutional backbones, then uses an attention mechanism to learn optimal weights for combining subband features before classification.
     """
@@ -89,8 +89,6 @@ class MultiScaleCNN(nn.Module):
         Returns:
             torch.Tensor: classification logits of shape (B, 2) for binary classification
         """
-        # x: (B, n_subbands*3, 256, 256)
-
         # extract features from each branch
         branch_feats = []
         for i in range(self.n_subbands):

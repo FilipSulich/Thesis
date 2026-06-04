@@ -19,13 +19,12 @@ class URPFeatures:
         """
         features = []
 
-        # Per-channel stats (R, G, B)
+        # per-channel stats (R, G, B)
         for c in range(3):
             ch = URP_rgb[:, :, c].ravel()
             ch_skew = skew(ch)
             ch_kurt = kurtosis(ch)
 
-            # handle NaN from constant channels
             features.extend([
                 float(ch.mean()),
                 float(ch.std()),
@@ -33,14 +32,14 @@ class URPFeatures:
                 0.0 if not np.isfinite(ch_kurt) else float(ch_kurt),
             ])
 
-        # Grayscale entropy
+        # grayscale entropy
         gray = rgb2gray(URP_rgb)
         hist, _ = np.histogram(gray, bins=64, range=(0, 1), density=True)
         hist = hist + 1e-10  # avoid log(0)
         entropy = -np.sum(hist * np.log(hist))
         features.append(float(entropy))
 
-        # GLCM texture on quantized gray
+        # GLCM texture features from grayscale image
         gray_u8 = (gray * 255).astype(np.uint8)
         glcm = graycomatrix(
             gray_u8,

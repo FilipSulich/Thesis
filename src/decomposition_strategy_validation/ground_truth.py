@@ -69,7 +69,7 @@ def save_ground_truth(ground_truth, ground_truth_data, band_names, save_path):
         ground_truth (dict): dictionary containing RQA metrics and parameters for each band
         ground_truth_data (dict): dictionary containing recurrence plot matrices, distance matrices, and pure sine signals
         band_names (list): list of wavelet subband names
-        save_path (str): file path for saving JSON file (NPZ file will use same path with _data.npz suffix)
+        save_path (str): file path for saving files
     """
     with open(save_path, 'w') as f:
         json.dump(ground_truth, f, indent=2)

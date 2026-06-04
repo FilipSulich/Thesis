@@ -10,13 +10,13 @@
 
 ## Project Overview
 
-This repository contains the implementation of a deep learning approach for predicting atrial fibrilation (AF) using a late-fusion convolutional neural network (CNN)
+This repository contains the implementation of a machine learning-based approach for predicting atrial fibrilation (AF) using a late-fusion convolutional neural network (CNN)
 and multi-scale unthresholded recurrence plots (URPs).
 
 ## Project Structure
 
 ### `src/CNN/`
-Contains the CNN model architectures, training pipelines, and evaluation utilities.
+Contains the CNN model architectures, cross-validation training setup, and evaluation functions.
 
 **Key files:**
 - `models/multi_scale_cnn.py` - Multi-scale CNN (7 branches for D2-D8 subbands with attention fusion)
@@ -49,7 +49,7 @@ Phase space reconstruction and recurrence plot generation.
 **Key files:**
 - `AMI.py` - Average Mutual Information for time delay estimation
 - `FNN.py` - False Nearest Neighbors for embedding dimension estimation
-- `recurrence_plot_generation.py` - Binary and unthresholded recurrence plot generation using pyrqa
+- `recurrence_plot_generation.py` - Binary and unthresholded recurrence plot generation using the pyrqa package (https://pypi.org/project/PyRQA/)
 
 ### `src/wavelet_selection_tests/`
 Experiments for selecting optimal wavelet function and decomposition strategy.
@@ -61,10 +61,10 @@ Experiments for selecting optimal wavelet function and decomposition strategy.
   - `leakage_plotter.py` - Visualization of leakage results
   - `main.py` - Run complete leakage analysis
 
-- `urp_discrminability/` - Tests for URP discriminability using texture features
+- `urp_discrminability/` - Tests for URP discriminability using image texture and statistical features
   - `wavelet_evaluator.py` - Cross-validated AUC comparison across wavelets
-  - `utrp_features.py` - Texture feature extraction from URPs
-  - `main.py` - Run discriminability analysis
+  - `utrp_features.py` - Feature extraction from URPs
+  - `main.py` - Run 5-fold CV training for the discriminability analysis (note it can take a while) 
 
 **Key files:**
 - `utils.py` - Subject grouping and effect size utilities
@@ -94,7 +94,7 @@ Validation of decomposition strategies using synthetic signals.
 2. Place the downloaded `data` folder into the `data_container/` directory
 3. Run the scripts as needed to train models or evaluate results
 
-**Note:** The raw ECG data is from the PAF Prediction Challenge Database available at PhysioNet (https://physionet.org/content/afpdb/1.0.0/).
+**Note:** The raw ECG data is from the PAF Prediction Challenge Database (AFPDB) available at PhysioNet (https://physionet.org/content/afpdb/1.0.0/).
 
 ## Installation
 
@@ -143,10 +143,10 @@ python ablation_study.py
 
 ## Methodology
 
-This implementation follows these steps :
+This implementation of the multi-scale recurrence analysis pipeline follows these steps :
 
 1. **Wavelet Decomposition**: ECG signals are decomposed into frequency subbands (D2-D8) using Stationary Wavelet Transform (SWT) with db8 wavelet
-2. **Phase Space Reconstruction**: Each subband is embedded using time delay parameters (tau from AMI, m from FNN)
+2. **Phase Space Reconstruction**: Each subband is embedded using parameters (tau from AMI, m from FNN)
 3. **Recurrence Plot Generation**: Unthresholded recurrence plots (URPs) are computed per wavelet scale using pyrqa
 4. **Multi-Scale CNN**: URPs from all subbands are processed by separate CNN branches with late feature-fusion and attention mechanisms to modulate the contribution of each scale
 5. **Classification**: Binary classification (NSR vs Pre-AF) using weighted cross-entropy loss

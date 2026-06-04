@@ -12,7 +12,7 @@ class LeakagePlotter:
         initializes plotter with output directory for saving figures
 
         Args:
-            output_dir (str): path to directory for saving plots
+            output_dir (Path): path to directory for saving plots
 
         Returns:
             None

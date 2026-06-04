@@ -103,6 +103,6 @@ def run_experiment(config, band_names, pipeline_names, n_trials=100, metrics=Non
     save_statistical_results(stats_df, stats_path)
 
     plot_boxplot_comparisons(agg_df, metrics, config.output_dir)
-    plot_violinplot_comparisons(agg_df, metrics, config.output_dir)
+    # plot_violinplot_comparisons(agg_df, metrics, config.output_dir)
 
     return agg_df, stats_df

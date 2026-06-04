@@ -24,10 +24,8 @@ class ExperimentConfig:
     level: int = 4          # decomposition level
     wavelet: str = 'db4'    # wavelet type
 
-    # subband frequencies
     subband_freqs: Dict[str, float] = None
 
-    # output directory
     output_dir: str = None
 
     def __post_init__(self):

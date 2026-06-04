@@ -7,7 +7,7 @@ from src.CNN.models.multi_scale_cnn import MultiScaleCNN
 from src.CNN.utils.datasets import CombinedH5Dataset
 from src.CNN.utils.evaluation import evaluate_model_folds
 from src.CNN.utils.statistics import compare_models
-from src.CNN.utils.plotting import plot_metric_boxplots
+from src.CNN.utils.plotting import plot_metric_box_plots
 from src.CNN.utils.utils import DEVICE
 
 DATA_ROOT = Path(__file__).parent.parent.parent.parent
@@ -21,7 +21,7 @@ RESULTS_LOW_FREQ = ABLATION_BASE / 'low_freq'
 RESULTS_MID_FREQ = ABLATION_BASE / 'mid_freq'
 RESULTS_FULL = DATA_ROOT / 'data_container' / 'data' /'model_weights' / 'multi'
 
-OUTPUT_DIR = DATA_ROOT / 'results_final' / 'ablation_results'
+OUTPUT_DIR = DATA_ROOT / 'results' / 'ablation_results'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 BATCH_SIZE = 32
@@ -58,7 +58,7 @@ def main():
         alpha=0.05
     )
 
-    plot_metric_boxplots(
+    plot_metric_box_plots(
         results,
         metrics=['auc', 'auprc'],
         output_path=OUTPUT_DIR / 'ablation_boxplots.png',

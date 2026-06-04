@@ -15,7 +15,7 @@ class LeakageStats:
         initializes statistical analyzer with output directory
 
         Args:
-            output_dir (str): directory path for saving statistical test results
+            output_dir (Path): directory path for saving statistical test results
         """
         self.output_dir = Path(output_dir)
 
@@ -107,21 +107,10 @@ class LeakageStats:
                         mean1 = df_cond[df_cond['wavelet'] == wav1]['DER'].mean()
                         mean2 = df_cond[df_cond['wavelet'] == wav2]['DER'].mean()
                         mean_diff = abs(mean1 - mean2)
-
-                        if p_val < 0.001:
-                            sig = '***'
-                        elif p_val < 0.01:
-                            sig = '**'
-                        elif p_val < 0.05:
-                            sig = '*'
-                        else:
-                            sig = 'ns'
-
                         comparisons.append({
                             'wavelet_1': wav1,
                             'wavelet_2': wav2,
                             'p_value': float(p_val),
-                            'significance': sig,
                             'mean_diff': float(mean_diff)
                         })
 
@@ -134,7 +123,7 @@ class LeakageStats:
 
     def create_db8_comparison_table(self, df: pd.DataFrame) -> None:
         """
-        creates pairwise comparison table of all wavelets against db8 baseline
+        creates pairwise comparison table of all wavelet functions against the db8 wavelet
 
         Args:
             df (pd.DataFrame): complete results dataframe with all wavelets and conditions
@@ -147,8 +136,8 @@ class LeakageStats:
         db8_harm = df[(df['wavelet'] == 'db8') & (df['condition'] == 'Harmonic')]['DER'].values
         db8_nonharm = df[(df['wavelet'] == 'db8') & (df['condition'] == 'Non-harmonic')]['DER'].values
 
-        dunn_harm_path = self.output_dir / 'dunn_posthoc_Harmonic.csv'
-        dunn_nonharm_path = self.output_dir / 'dunn_posthoc_Non-harmonic.csv'
+        dunn_harm_path = self.output_dir / 'dunn_posthoc_harmonic.csv'
+        dunn_nonharm_path = self.output_dir / 'dunn_posthoc_non-harmonic.csv'
 
         if not dunn_harm_path.exists() or not dunn_nonharm_path.exists():
             return

@@ -64,24 +64,19 @@ class FNN:
 
             embedded_m_trunc = embedded_m[:n_points_m1]
 
-            # Find nearest neighbor in m-dimensional space
             nbrs = NearestNeighbors(n_neighbors=2, metric='euclidean').fit(embedded_m_trunc)
             distances, indices = nbrs.kneighbors(embedded_m_trunc)
 
-            # Get nearest neighbor distances (exclude self at index 0)
             nn_dist_m = distances[:, 1]
             nn_indices = indices[:, 1]
 
-            # Compute distances in m+1 dimensional space
             nn_dist_m1 = np.linalg.norm(embedded_m1 - embedded_m1[nn_indices], axis=1)
 
-            # Calculate ratio increase (avoid division by zero)
             ratio = np.divide(np.abs(nn_dist_m1 - nn_dist_m), nn_dist_m, out=np.zeros_like(nn_dist_m), where=nn_dist_m!=0)
 
-            # Calculate standard deviation of signal
             Ra = np.std(self.signal)
 
-            # Count false nearest neighbors
+            # count false nearest neighbors
             false_neighbors = 0
             for i in range(len(ratio)):
                 if ratio[i] > self.r_tol:

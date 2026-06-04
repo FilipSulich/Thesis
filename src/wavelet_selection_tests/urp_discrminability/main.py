@@ -12,11 +12,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.wavelet_selection_tests.urp_discrminability.wavelet_evaluator import WaveletEvaluator
 
 DATA_DIR = PROJECT_ROOT / 'data_container' / 'raw_data' / 'paf'
-SPLIT_JSON = PROJECT_ROOT / 'data_container' / 'processed_data' / 'urp_no_denoise' / 'split.json'
+SPLIT_JSON = PROJECT_ROOT / 'data_container' / 'data' /'processed_data' / 'urp_no_denoise' / 'fold_splits.json'
 PARAMS_JSON = PROJECT_ROOT / 'data_container' / 'raw_data' / 'tau_m_params.json'
-RESULTS_DIR = PROJECT_ROOT / 'data_container' / 'data' / 'results' / 'urp_discrminability'
+RESULTS_DIR = PROJECT_ROOT / 'results' / 'urp_discriminability_analysis'
 
-# Config
+# configuration parameters
 FS_ORIG = 128
 FS_TARGET = 500
 SEGMENT_SAMPLES = 5000
@@ -25,15 +25,17 @@ SUBBAND_NAMES = [f'D{i}' for i in range(2, 9)]
 
 
 def load_ecg_segments():
-    """Load and segment ECG data for wavelet testing."""
+    """load and segment ECG data for wavelet testing."""
 
     with open(SPLIT_JSON) as f:
-        split = json.load(f)
+        fold_data = json.load(f)
 
-    train_records = split['train']
-    val_records = split['val']
-    test_records = split['test']
-    combined_records = train_records + val_records + test_records
+    all_records = set()
+    for fold in fold_data['folds']:
+        all_records.update(fold['train_record_ids'])
+        all_records.update(fold['val_record_ids'])
+
+    combined_records = list(all_records)
 
     #pre-AF records
     preaf_recs = [r for r in combined_records if r.startswith('p')]
@@ -42,7 +44,7 @@ def load_ecg_segments():
     nsr_recs = [r for r in combined_records if r.startswith('n')]
 
     def extract_segments(record_id, label):
-        """Extract segments from one record.
+        """extract segments from one record.
         Args:
             record_id (str): record ID
             label (str): label
@@ -51,11 +53,11 @@ def load_ecg_segments():
             rec = wfdb.rdrecord(str(DATA_DIR / record_id))
             raw = rec.p_signal[:, 0].astype(np.float64)
 
-            # Resample to target fs
+            # resample to target fs
             n = int(len(raw) * FS_TARGET / FS_ORIG)
             sig = resample(raw, n).astype(np.float64)
 
-            # Get evenly-spaced segments
+            # get evenly-spaced segments
             max_start = len(sig) - SEGMENT_SAMPLES
             if max_start <= 0:
                 return [], [], []
@@ -93,7 +95,7 @@ def load_ecg_segments():
 
 
 def load_embedding_params():
-    """Load tau/m parameters for each subband."""
+    """load tau/m parameters for each subband."""
     with open(PARAMS_JSON) as f:
         raw_params = json.load(f)
 
@@ -113,6 +115,10 @@ def load_embedding_params():
 
 
 def main():
+    """
+    main function to conduct the urp discriminability test (perform 5-fold cross-validation training).
+    """
+
     signals, labels, record_ids = load_ecg_segments()
     embedding_params = load_embedding_params()
 

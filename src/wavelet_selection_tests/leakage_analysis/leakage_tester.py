@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
+from src.pipelines.pipeline_wavelets import Pipeline
 from .signal_generator import SignalGenerator
 
 HARM_FREQS = {
@@ -26,7 +26,7 @@ NON_HARM_FREQS = {
 BAND_NAMES = ['D1', 'D2', 'D3', 'D4', 'A4']
 
 class LeakageTester:
-    """tests wavelets for frequency leakage across subbands using synthetic signals"""
+    """tests wavelets for frequency leakage across subbands using synthetic sinusoid signals"""
 
     def __init__(self, fs=128, n_samples=1280, level=4, output_dir=None):
         """
@@ -36,7 +36,7 @@ class LeakageTester:
             fs (int): sampling frequency in Hz
             n_samples (int): number of samples per test signal
             level (int): decomposition level for wavelet transform
-            output_dir (str): directory to save results (JSON + CSV)
+            output_dir (Path): directory to save results (JSON + CSV)
         """
         self.fs = fs
         self.level = level
@@ -56,7 +56,6 @@ class LeakageTester:
         Returns:
             np.array: confusion matrix where rows=source band, cols=target band, diagonal=correct isolation
         """
-        from src.pipelines.pipeline_wavelets import Pipeline
 
         n_bands = len(BAND_NAMES)
         confusion = np.zeros((n_bands, n_bands))
@@ -70,12 +69,12 @@ class LeakageTester:
         for i, source_band in enumerate(BAND_NAMES):
             source_freq = freq_map[source_band]
 
-            # Generate pure sine
+            # generate pure sine
             signal = self.sig_gen.pure_sine(source_freq, jitter=0.05)
 
             outputs = pipeline.pipeline_swt_recon(signal)
 
-            # Measure energy in each band
+            # measure energy in each band
             total_energy = sum(
                 np.sum(outputs[band] ** 2)
                 for band in BAND_NAMES
@@ -144,17 +143,14 @@ class LeakageTester:
         all_results = []
 
         for trial_num in range(n_trials):
-            if (trial_num + 1) % 5 == 0:
-                print(f"Trial {trial_num + 1}/{n_trials}")
-
-            for wavelet in tqdm(wavelets, desc=f"Trial {trial_num+1}", leave=False):
-                # Test harmonic
+            for wavelet in tqdm(wavelets, desc=f"trial {trial_num+1}", leave=False):
+                # test harmonic
                 result_harm = self.test_wavelet(
                     wavelet, HARM_FREQS, 'Harmonic', trial_num
                 )
                 all_results.append(result_harm)
 
-                # Test non-harmonic
+                # test non-harmonic
                 result_nonharm = self.test_wavelet(
                     wavelet, NON_HARM_FREQS, 'Non-harmonic', trial_num
                 )
@@ -169,10 +165,6 @@ class LeakageTester:
             }
             for r in all_results
         ])
-
-        json_path = self.output_dir / 'der_results.json'
-        with open(json_path, 'w') as f:
-            json.dump(all_results, f, indent=2)
 
         csv_path = self.output_dir / 'der_results.csv'
         df.to_csv(csv_path, index=False)

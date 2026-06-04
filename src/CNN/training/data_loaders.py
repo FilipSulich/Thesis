@@ -11,14 +11,13 @@ class FullDataset(Dataset):
     combines data from different sets (training, validation and test) into one pool for patient-level 10-fold CV
     """
 
-    def __init__(self, h5_dir: Path, mode: str = 'multi_denoise', cache: bool = True, subband_keys=None):
+    def __init__(self, h5_dir: Path, mode: str = 'multi_denoise', subband_keys=None):
         """
         initializes the combined dataset by loading all splits and creating a unified sample mapping
 
         Args:
             h5_dir (Path): directory containing train.h5, val.h5, and test.h5 files
             mode (str): loading mode, either 'multi', 'multi_denoise', or 'single', defaults to 'multi_denoise'
-            cache (bool): unused parameter kept for backward compatibility, defaults to True
             subband_keys (list): list of subband keys to load for multi modes, defaults to None which uses all D2-D8
         """
         self.mode = mode

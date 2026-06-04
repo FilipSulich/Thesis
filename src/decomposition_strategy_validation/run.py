@@ -6,10 +6,11 @@ from src.decomposition_strategy_validation import (
 
 def main():
     """
-    main function for running the experiment
+    main function for running the decomposition strategy validation experiment
     """
 
     # select the frequency placement condition by uncommenting the appriopiate line below:
+
     # method = "HARMONIC"
     method = "NON_HARMONIC"
 
@@ -17,7 +18,7 @@ def main():
 
     if method == "HARMONIC":
         subband_freq =  {
-            'A4': 2,
+            'A4': 2,    # 0-4 Hz
             'D4': 6,    # 4-8 Hz
             'D3': 12,   # 8-16 Hz
             'D2': 24,   # 16-32 Hz
@@ -25,7 +26,7 @@ def main():
         }
     elif method == "NON_HARMONIC":
         subband_freq = {
-            'A4': 3,
+            'A4': 3,    # 0-4 hz
             'D4': 7,    # 4-8 Hz
             'D3': 13,   # 8-16 Hz
             'D2': 31,   # 16-32 Hz
@@ -45,8 +46,9 @@ def main():
     band_names = ['D1', 'D2', 'D3', 'D4', 'A4']
     pipeline_names = ['swt_recon', 'swt_direct', 'dwt_recon']
 
+    print("running experiment...")
     agg_df, stats_df = run_experiment(config=config,band_names=band_names,pipeline_names=pipeline_names,n_trials=100)
-    print("experiment finished\n")
+    print("experiment finished")
 
 
 if __name__ == '__main__':

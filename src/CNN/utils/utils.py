@@ -22,12 +22,12 @@ def get_subject_group(record_id: str) -> int:
     extract patient group from record ID for cross-validation.
 
     grouping strategy:
-    - Pre-AF (p*): Odd-even pairs from same patient
+    - pre-AF (p*): odd-even pairs from same patient
       p01 & p02 → group 101
       p03 & p04 → group 102
       p05 & p06 → group 103, etc.
 
-    - NSR (n*): All variants of same base patient number
+    - NSR (n*): all variants of same base patient number
       n01, n01c, n02, n02c → group 201 (all from patient 1)
       n03, n03c, n04, n04c → group 202 (all from patient 2)
       n05, n05c, n06, n06c → group 203, etc.

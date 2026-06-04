@@ -1,5 +1,3 @@
-"""recurrence plot and RQA computation."""
-
 import os
 import numpy as np
 from pyrqa.settings import Settings
