@@ -7,7 +7,7 @@ from pyrqa.computation import RPComputation, RQAComputation
 import numpy as np
 
 class RecurrencePlotGenerator:
-    """generates binary and unthresholded recurrence plots from time series using pyrqa"""
+    """generates binary and unthresholded recurrence plots from time series using pyrqa package"""
 
     def __init__(self, signal, time_delay, embedding_dim, epsilon, unthresholded=False, path = ""):
         """

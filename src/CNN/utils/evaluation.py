@@ -187,7 +187,6 @@ def evaluate_model_folds(model_class, model_params, checkpoint_dir, dataset, dev
         if 'val_record_ids' in checkpoint:
             metrics['val_record_ids'] = checkpoint['val_record_ids']
 
-        # print(f"AUC: {metrics['auc']:.4f}, AUPRC: {metrics['auprc']:.4f} Sensitivity: {metrics['sensitivity']:.4f}, Specificity: {metrics['specificity']:.4f}")
         fold_results.append(metrics)
 
     return fold_results

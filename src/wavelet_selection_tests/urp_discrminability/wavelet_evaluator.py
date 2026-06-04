@@ -88,9 +88,8 @@ class WaveletEvaluator:
         """
         coeffs = pywt.swt(signal_padded, wavelet, level=N_SWT_LEVELS)
         n = len(coeffs)
-        target_idx = n - level  # D2 -> idx 8, D8 -> idx 2
+        target_idx = n - level
 
-        # Zero out all except target subband
         zeroed = []
         for j, (cA, cD) in enumerate(coeffs):
             if j == target_idx:

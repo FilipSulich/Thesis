@@ -7,7 +7,9 @@ from src.wavelet_selection_tests.leakage_analysis.leakage_tester import LeakageT
 from src.wavelet_selection_tests.leakage_analysis.leakage_plotter import LeakagePlotter
 from src.wavelet_selection_tests.leakage_analysis.leakage_stats import LeakageStats
 
-output_dir = Path(__file__).parent / 'results'
+DATA_ROOT = Path(__file__).parent.parent.parent.parent
+
+output_dir = DATA_ROOT / 'results' / 'leakage_analysis'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -15,7 +17,7 @@ def main():
     """
     main function to run the leakage analysis
     """
-    print("running leakage tests")
+    print("running leakage tests...")
 
     tester = LeakageTester(fs=128, n_samples=1280, level=4, output_dir=output_dir)
     df = tester.run_all(
@@ -32,15 +34,13 @@ def main():
 
 
     #plots
-    print("plotting")
     plotter = LeakagePlotter(output_dir)
     plotter.plot_der_comparison(df)
 
     #stats
     stats = LeakageStats(output_dir)
     stats.save_all_stats(df)
-    stats.create_db8_comparison_table(df)
-    print(f"saving stats to {output_dir}")
+    print(f"saving data to {output_dir}")
 
 if __name__ == '__main__':
    main()
