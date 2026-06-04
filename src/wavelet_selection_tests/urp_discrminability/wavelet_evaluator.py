@@ -16,7 +16,7 @@ from scipy.stats import friedmanchisquare, wilcoxon
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-from src.wavelet_selection_tests.urp_discrminability.utrp_features import URPFeatures
+from src.wavelet_selection_tests.urp_discrminability.urp_features import URPFeatures
 from src.wavelet_selection_tests.utils import get_subject_group
 
 CANDIDATE_WAVELETS = (
@@ -88,9 +88,8 @@ class WaveletEvaluator:
         """
         coeffs = pywt.swt(signal_padded, wavelet, level=N_SWT_LEVELS)
         n = len(coeffs)
-        target_idx = n - level  # D2 -> idx 8, D8 -> idx 2
+        target_idx = n - level
 
-        # Zero out all except target subband
         zeroed = []
         for j, (cA, cD) in enumerate(coeffs):
             if j == target_idx:

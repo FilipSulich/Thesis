@@ -9,7 +9,7 @@ def get_subject_group(record_id):
         record_id (str): patient record identifier (e.g., 'p01', 'n03')
 
     Returns:
-        int: group ID for grouping (101-1xx for pre-AF, 201-2xx for NSR, -1 if invalid)
+        int: group ID for grouping
     """
     m = re.match(r'n(\d+)', record_id)
     if m:

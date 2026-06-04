@@ -237,7 +237,7 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
         std_auc = np.std(aucs)
 
         color = colors.get(model_name, '#000000')
-        ax1.plot(mean_fpr, mean_tpr, color=color, lw=2.5,label=f'{model_name} ({mean_auc:.3f} +- {std_auc:.3f})')
+        ax1.plot(mean_fpr, mean_tpr, color=color, lw=2.5,label=f'{model_name} ({mean_auc:.3f} ± {std_auc:.3f})')
         ax1.fill_between(mean_fpr, np.maximum(mean_tpr - std_tpr, 0),np.minimum(mean_tpr + std_tpr, 1), color=color, alpha=0.2)
 
     # random classifier baseline
@@ -249,7 +249,6 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
     ax1.grid(alpha=0.3, linestyle='--')
 
     # pr curves (right panel)
-    # calculate positive class ratio for random baseline
     all_labels = []
     for fold_results in data_dict.values():
         for fold in fold_results:
@@ -271,9 +270,9 @@ def plot_roc_and_pr_combined(data_dict, colors=None, output_path=None, title='RO
         mean_precision = np.mean(precisions_interp, axis=0)
         std_precision = np.std(precisions_interp, axis=0)
         mean_auprc = np.mean(auprcs)
-
+        std_auprc = np.std(auprcs)
         color = colors.get(model_name, '#000000')
-        ax2.plot(mean_recall, mean_precision, color=color, lw=2.5, label=f'{model_name} ({mean_auprc:.3f})')
+        ax2.plot(mean_recall, mean_precision, color=color, lw=2.5, label=f'{model_name} ({mean_auprc:.3f} ± {std_auprc:.3f})')
         ax2.fill_between(mean_recall, np.maximum(mean_precision - std_precision, 0), np.minimum(mean_precision + std_precision, 1), color=color, alpha=0.2)
 
     # random classifier baseline

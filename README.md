@@ -21,13 +21,14 @@ Contains the CNN model architectures, cross-validation training setup, and evalu
 **Key files:**
 - `models/multi_scale_cnn.py` - Multi-scale CNN (7 branches for D2-D8 subbands with attention fusion)
 - `models/full_band_cnn.py` - Full-band baseline CNN (the same architecture as the multi-scale branches but with single input)
-- `training/unified_cross_validator.py` - Cross-validation setup for training every model configuration with patient-level fold grouping
+- `training/cross_validation.py` - Cross-validation setup for training every model configuration with patient-level fold grouping
 - `dataset/dataset_generator.py` - Generates a dataset of URPs from ECG signals
 - `utils/datasets.py` - PyTorch dataset classes for loading H5 data
 - `utils/evaluation.py` - Model evaluation metrics and utilities
 
 **Runnable scripts:**
 - `tests/model_evaluator.py` - Evaluate trained models on the validation folds and save results for later analysis
+- `ablation/ablation_study.py` - Evaluate trained ablation models on the validation folds and save results for later analysis
 
 ### `src/wavelets/`
 Wavelet transform implementations for signal decomposition.
@@ -44,7 +45,7 @@ Wavelet decomposition pipeline strategies.
 - `pipeline_wavelets.py` - Wrapper for different decomposition strategies (SWT-R, SWT-D, DWT-R)
 
 ### `src/recurrence_plot/`
-Phase space reconstruction and recurrence plot generation.
+Recurrence plot generation.
 
 **Key files:**
 - `AMI.py` - Average Mutual Information for time delay estimation
@@ -52,7 +53,7 @@ Phase space reconstruction and recurrence plot generation.
 - `recurrence_plot_generation.py` - Binary and unthresholded recurrence plot generation using the pyrqa package (https://pypi.org/project/PyRQA/)
 
 ### `src/wavelet_selection_tests/`
-Experiments for selecting optimal wavelet function and decomposition strategy.
+Experiments for selecting an appriopiate wavelet function based on the leakage analysis and URP discriminability tests.
 
 **Subdirectories:**
 - `leakage_analysis/` - Tests for energy leakage across subbands
@@ -63,7 +64,7 @@ Experiments for selecting optimal wavelet function and decomposition strategy.
 
 - `urp_discrminability/` - Tests for URP discriminability using image texture and statistical features
   - `wavelet_evaluator.py` - Cross-validated AUC comparison across wavelets
-  - `utrp_features.py` - Feature extraction from URPs
+  - `urp_features.py` - Feature extraction from URPs
   - `main.py` - Run 5-fold cross-validation training for the discriminability analysis (note it can take a while) 
 
 **Key files:**
@@ -73,7 +74,7 @@ Experiments for selecting optimal wavelet function and decomposition strategy.
 Validation of decomposition strategies using synthetic signals.
 
 **Key files:**
-- `experiment.py` - Main experiment runner for strategy validation
+- `experiment.py` - Main experiment runner for decomposition strategy validation
 - `signals.py` - Synthetic signal generation with known frequency content
 - `embedding.py` - Phase space embedding utilities
 - `recurrence.py` - Recurrence plot computation
@@ -87,23 +88,23 @@ Validation of decomposition strategies using synthetic signals.
 
 ## Dataset
 
-**IMPORTANT:** The processed dataset is not included in this repository due to size constraints (it is more than 30 GB of data).
+**IMPORTANT:** The processed dataset and trained model weights is not included in this repository due to size constraints (it is more than 30 GB of data).
 
 **Download the dataset:**
 1. Download the URP data and model weights from Google Drive: **https://drive.google.com/drive/folders/1NplSsH6urf2LSVbM0s3QcqdQjDLAxCP7?usp=sharing**
 2. Place the downloaded `data` folder into the `data_container/` directory
-3. Run the scripts as needed to train models or evaluate results
+3. Run the scripts as needed to evaluate results or train the models (note that training the models from scratch will require significant computational resources and time, so it is recommended to use the provided trained weights for evaluation)
 
 **Note:** The raw ECG data is from the PAF Prediction Challenge Database (AFPDB) available at PhysioNet (https://physionet.org/content/afpdb/1.0.0/).
 
 ## Installation
 
 ```bash
-# Create virtual environment
+# create virtual environment
 python -m venv venv
 source venv/bin/activate 
 
-# Install dependencies
+# install dependencies
 pip install -r requirements.txt
 ```
 
@@ -120,7 +121,7 @@ pip install -r requirements.txt
 
 ## Usage Examples
 ```bash
-# Leakage analysis
+# leakage analysis
 cd src/wavelet_selection_tests/leakage_analysis
 python main.py
 
@@ -128,15 +129,15 @@ python main.py
 cd src/wavelet_selection_tests/urp_discrminability
 python main.py
 
-# Decomposition strategy validation
+# decomposition strategy validation
 cd src/decomposition_strategy_validation
 python run.py
 
-# Model evaluation
+# model evaluation
 cd src/CNN/tests
 python model_evaluator.py
 
-# Ablation study
+# ablation study
 cd src/CNN/ablation
 python ablation_study.py
 ```

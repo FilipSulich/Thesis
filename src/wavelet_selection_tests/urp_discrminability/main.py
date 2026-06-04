@@ -12,9 +12,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.wavelet_selection_tests.urp_discrminability.wavelet_evaluator import WaveletEvaluator
 
 DATA_DIR = PROJECT_ROOT / 'data_container' / 'raw_data' / 'paf'
-SPLIT_JSON = PROJECT_ROOT / 'data_container' / 'data' /'processed_data' / 'urp_no_denoise' / 'fold_splits.json'
 PARAMS_JSON = PROJECT_ROOT / 'data_container' / 'raw_data' / 'tau_m_params.json'
-RESULTS_DIR = PROJECT_ROOT / 'results' / 'urp_discriminability_analysis'
+output_dir = PROJECT_ROOT / 'results' / 'urp_discrminability'
+output_dir.mkdir(parents=True, exist_ok=True)
+
 
 # configuration parameters
 FS_ORIG = 128
@@ -25,29 +26,25 @@ SUBBAND_NAMES = [f'D{i}' for i in range(2, 9)]
 
 
 def load_ecg_segments():
-    """load and segment ECG data for wavelet testing."""
+    """
+    load and segment ECG data for wavelet testing.
+    """
 
-    with open(SPLIT_JSON) as f:
-        fold_data = json.load(f)
+    # gets the available data from teh raw_data directory
+    all_files = list(DATA_DIR.glob('*.hea'))
+    all_records = [f.stem for f in all_files]
 
-    all_records = set()
-    for fold in fold_data['folds']:
-        all_records.update(fold['train_record_ids'])
-        all_records.update(fold['val_record_ids'])
+    # pre-AF records (label=1)
+    preaf_recs = [r for r in all_records if r.startswith('p')]
 
-    combined_records = list(all_records)
-
-    #pre-AF records
-    preaf_recs = [r for r in combined_records if r.startswith('p')]
-
-    #NSR records
-    nsr_recs = [r for r in combined_records if r.startswith('n')]
+    # NSR records (label=0)
+    nsr_recs = [r for r in all_records if r.startswith('n')]
 
     def extract_segments(record_id, label):
-        """extract segments from one record.
+        """rxtract segments from one record.
         Args:
             record_id (str): record ID
-            label (str): label
+            label (int): label (0=NSR, 1=Pre-AF)
         """
         try:
             rec = wfdb.rdrecord(str(DATA_DIR / record_id))
@@ -116,7 +113,7 @@ def load_embedding_params():
 
 def main():
     """
-    main function to conduct the urp discriminability test (perform 5-fold cross-validation training).
+    main function to conduct the URP discriminability test (train the models using 5-fold cross-validation - note that it takes a long time)
     """
 
     signals, labels, record_ids = load_ecg_segments()
@@ -130,15 +127,18 @@ def main():
         n_cv_splits=5,
         results_dir=RESULTS_DIR,
     )
-    print("running the wavelet selection test")
+    print("running the wavelet selection test...")
     df = evaluator.run_all()
     evaluator.save_results()
+    print("experiment finished")
 
     stats = evaluator.perform_statistical_tests(alpha=0.05)
     evaluator.save_statistical_tests(stats)
 
     best = df.iloc[0]
+
     print(f"\nbest wavelet: {best['wavelet']} (median AUC: {best['median_auc']:.4f})")
+
 
 if __name__ == '__main__':
     main()
