@@ -13,7 +13,7 @@ from src.wavelet_selection_tests.urp_discrminability.wavelet_evaluator import Wa
 
 DATA_DIR = PROJECT_ROOT / 'data_container' / 'raw_data' / 'paf'
 PARAMS_JSON = PROJECT_ROOT / 'data_container' / 'raw_data' / 'tau_m_params.json'
-RESULTS_DIR = PROJECT_ROOT / 'results' / 'urp_discrminability'
+RESULTS_DIR = PROJECT_ROOT / 'results' / 'urp_discriminability'
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -29,7 +29,6 @@ def load_ecg_segments():
     """
     load and segment ECG data for wavelet testing.
     """
-
     # gets the available data from teh raw_data directory
     all_files = list(DATA_DIR.glob('*.hea'))
     all_records = [f.stem for f in all_files]
@@ -111,7 +110,7 @@ def load_embedding_params():
 
 def main():
     """
-    main function to conduct the URP discriminability test (train the models using 5-fold cross-validation - note that it takes a long time)
+    main function to conduct the URP discriminability test (train the models using 5-fold cross-validation - note that it takes quite some time)
     """
 
     signals, labels, record_ids = load_ecg_segments()

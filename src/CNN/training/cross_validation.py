@@ -17,7 +17,7 @@ from src.CNN.utils.utils import DEVICE, get_subject_group, set_seed
 
 class CrossValidator:
     """
-    cross-validation trainer supporting:
+    cross-validation supporting:
     - full-band models
     - multi-scale models with configurable subbands (ablation)
     - denoised or non-denoised dataset
@@ -80,7 +80,7 @@ class CrossValidator:
 
         set_seed(self.seed)
 
-    def _get_dataset_mode(self) -> str:
+    def _get_dataset_mode(self):
         """determine dataset loading mode based on configuration."""
         if self.model_type == 'single':
             return 'single'
@@ -89,7 +89,7 @@ class CrossValidator:
         else:
             return 'multi'
 
-    def _create_model(self) -> nn.Module:
+    def _create_model(self):
         """create model based on configuration"""
         if self.model_type == 'single':
             return FullBandCNN(dropout=self.dropout).to(self.device)
@@ -182,7 +182,7 @@ class CrossValidator:
         all_weights = np.concatenate(all_weights, axis=0)
         return np.mean(all_weights, axis=0)
 
-    def run(self) -> Dict:
+    def run(self):
         """
         run complete cross-validation training.
 

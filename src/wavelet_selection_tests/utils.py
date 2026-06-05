@@ -25,7 +25,7 @@ def get_subject_group(record_id):
 
 def _compute_rank_biserial(x, y):
     """
-    computes rank-biserial correlation as non-parametric effect size measure
+    computes rank-biserial correlation as non-parametric effect size
 
     Args:
         x (np.array): first sample array

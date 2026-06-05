@@ -7,7 +7,7 @@ from src.wavelets.wavelet_transform import WaveletTransform
 
 
 class SWT(WaveletTransform):
-    """stationary wavelet transform (SWT) implementation using PyWavelets"""
+    """Stationary Wavelet Transform (SWT) implementation using PyWavelets"""
 
     def decompose(self, signal: np.ndarray, level: int) -> list:
         """

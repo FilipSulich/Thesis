@@ -18,7 +18,7 @@ class ExperimentConfig:
 
     # signal parameters
     fs: int = 128           # sampling frq
-    n: int = 1024           # signal length
+    n: int = 1024           # signal length (dyadic length)
 
     # wavelet parameters
     level: int = 4          # decomposition level

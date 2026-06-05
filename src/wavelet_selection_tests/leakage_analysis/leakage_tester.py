@@ -69,12 +69,10 @@ class LeakageTester:
         for i, source_band in enumerate(BAND_NAMES):
             source_freq = freq_map[source_band]
 
-            # generate pure sine
             signal = self.sig_gen.pure_sine(source_freq, jitter=0.05)
 
             outputs = pipeline.pipeline_swt_recon(signal)
 
-            # measure energy in each band
             total_energy = sum(
                 np.sum(outputs[band] ** 2)
                 for band in BAND_NAMES
@@ -115,17 +113,17 @@ class LeakageTester:
             trial_num (int): trial number for tracking
 
         Returns:
-            dict: test results containing wavelet, condition, trial, DER, and confusion matrix
+            dict: test results containing wavelet, condition, trial, ER, and confusion matrix
         """
 
         confusion = self.compute_confusion_matrix(wavelet, freq_map)
-        der = self.compute_energy_ratio(confusion)
+        er = self.compute_energy_ratio(confusion)
 
         return {
             'wavelet': wavelet,
             'condition': condition_name,
             'trial': trial_num,
-            'DER': der,
+            'DER': er,
             'confusion_matrix': confusion.tolist(),
         }
 

@@ -14,7 +14,7 @@ from src.decomposition_strategy_validation.recurrence import (
 
 def generate_ground_truth(config, band_names):
     """
-    generate reference recurrence plots and RQA metrics from pure single-frequency sinusoidal signals for each subband
+    generate reference recurrence plots and RQA metrics from single-frequency sinusoidal signals for each subband
 
     Args:
         config (ExperimentConfig): experiment configuration instance containing sampling frequency, signal length, subband frequencies, and output directory

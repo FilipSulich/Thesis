@@ -30,7 +30,7 @@ class Pipeline:
 
     def pipeline_swt_recon(self, signal):
         """
-        performs SWT decomposition and reconstructs each subband separately in time domain
+        performs SWT decomposition and reconstructs each subband separately in time domain (SWT-R)
 
         Args:
             signal (np.ndarray): input time series signal
@@ -61,7 +61,7 @@ class Pipeline:
 
     def pipeline_swt_direct(self, signal):
         """
-        extracts wavelet coefficients directly from SWT without reconstruction
+        extracts wavelet coefficients directly from SWT without reconstruction (SWT-D)
 
         Args:
             signal (np.ndarray): input time series signal
@@ -83,7 +83,7 @@ class Pipeline:
 
     def pipeline_dwt_recon(self, signal):
         """
-        performs DWT decomposition and reconstructs each subband separately in time domain
+        performs DWT decomposition and reconstructs each subband separately in time domain (DWT-R)
 
         Args:
             signal (np.ndarray): input time series signal

@@ -19,7 +19,7 @@ class LeakageStats:
         """
         self.output_dir = Path(output_dir)
 
-    def save_all_stats(self, df: pd.DataFrame) -> None:
+    def save_all_stats(self, df: pd.DataFrame):
         """
         runs all statistical tests and saves results to files for both conditions
 
@@ -35,7 +35,7 @@ class LeakageStats:
             self._save_summary(df_cond, condition)
             self._run_tests(df_cond, condition)
 
-    def _save_summary(self, df_cond: pd.DataFrame, condition: str) -> None:
+    def _save_summary(self, df_cond: pd.DataFrame, condition: str):
         """
         computes and saves descriptive statistics for one condition
 
@@ -65,7 +65,7 @@ class LeakageStats:
         summary_path = self.output_dir / f'summary_statistics_{condition}.csv'
         summary_df.to_csv(summary_path, index=False)
 
-    def _run_tests(self, df_cond: pd.DataFrame, condition: str) -> None:
+    def _run_tests(self, df_cond: pd.DataFrame, condition: str):
         """
         performs kruskal-wallis test and dunn post-hoc pairwise comparisons
 
@@ -92,7 +92,7 @@ class LeakageStats:
             json.dump(kw_results, f, indent=2)
 
         try:
-            dunn_results = posthoc_dunn(df_cond, val_col='DER', group_col='wavelet', p_adjust='fdr_bh')
+            dunn_results = posthoc_dunn(df_cond, val_col='DER', group_col='wavelet', p_adjust='holm')
 
             dunn_path = self.output_dir / f'dunn_posthoc_{condition}.csv'
             dunn_results.to_csv(dunn_path)
@@ -119,7 +119,7 @@ class LeakageStats:
         except Exception:
             pass
 
-    def create_db8_comparison_table(self, df: pd.DataFrame) -> None:
+    def create_db8_comparison_table(self, df: pd.DataFrame):
         """
         creates pairwise comparison table of all wavelet functions against the db8 wavelet
 

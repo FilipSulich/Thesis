@@ -34,7 +34,15 @@ PAD_SAMPLES = math.ceil(SEGMENT_SAMPLES / 2**N_LEVELS_SWT) * 2**N_LEVELS_SWT
 
 
 def _pad(x: np.ndarray):
-    """pad signal to power-of-2 length for SWT."""
+    """
+    pad signal to power-of-2 length for SWT.
+
+    Args:
+        x (np.ndarray): input signal
+
+    Returns:
+        padded signal of length PAD_SAMPLES
+    """
     pad = PAD_SAMPLES - len(x)
     if pad <= 0:
         return x[:PAD_SAMPLES]
@@ -47,6 +55,12 @@ def _apply_soft_threshold(coeffs: List[Tuple[np.ndarray, np.ndarray]]):
 
     threshold: T = sigma * sqrt(2 * log(N))
     sigma: noise estimation from MAD (median absolute deviation)
+
+    Args:
+        coeffs (List[Tuple[np.ndarray, np.ndarray]]): list of (approximation, detail) coefficient tuples from SWT
+
+    Returns:
+        List[Tuple[np.ndarray, np.ndarray]]: list of denoised (approximation, detail) coefficient tuples
     """
     N_log = math.log2(FS_TARGET / 0.5)
     denoised = []
@@ -65,8 +79,14 @@ def extract_subbands_no_denoise(signal_padded: np.ndarray,wavelet: str = WAVELET
 
     decomposes signal with SWT, then reconstructs each subband individually by zeroing all other levels
 
-    returns:
-        dict of {'D2': ..., 'D3': ..., ...}
+    Args:
+        signal_padded (np.ndarray): padded input signal
+        wavelet (str): wavelet family to use
+        n_levels (int): number of decomposition levels
+        subband_levels (List[int]): which subband levels to extract
+
+    Returns:
+        Dict: dict of {'D2': ..., 'D3': ..., ...}
     """
     coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
     n_lvls = len(coeffs)
@@ -91,9 +111,14 @@ def denoise_and_extract_subbands(signal_padded: np.ndarray,wavelet: str = WAVELE
       3. reconstruct full denoised signal
       4. reconstruct individual subbands by zeroing other levels
 
-    returns:
-        denoised: full denoised signal (SEGMENT_SAMPLES,)
-        subbands: dict of {'D2': ..., 'D3': ..., ...}
+    Args:
+        signal_padded (np.ndarray): padded input signal
+        wavelet (str): wavelet family to use
+        n_levels (int): number of decomposition levels
+        subband_levels (List[int]): which subband levels to extract
+
+    Returns:
+        Tuple: (denoised signal, subbands dict) where denoised is full denoised signal (SEGMENT_SAMPLES,) and subbands is dict of {'D2': ..., 'D3': ..., ...}
     """
     coeffs = pywt.swt(signal_padded, wavelet, level=n_levels)
     denoised_coeffs = _apply_soft_threshold(coeffs)
@@ -118,8 +143,14 @@ def compute_urp(signal: np.ndarray, tau: int, m: int, size: int = URP_SIZE):
     """
     compute unthresholded recurrence plot (URP) with JET colormap.
 
-    returns:
-        RGB image (3, size, size) or None if computation fails
+    Args:
+        signal (np.ndarray): input signal
+        tau (int): time delay for embedding
+        m (int): embedding dimension
+        size (int): output image size
+
+    Returns:
+        np.ndarray or None: RGB image (3, size, size) or None if computation fails
     """
     try:
         sig = signal[:SEGMENT_SAMPLES].astype(np.float32)
@@ -157,8 +188,12 @@ def build_subject_groups(nsr_records: List[str], preaf_records: List[str]):
     NSR:   (n01, n01c, n02, n02c) → one subject group
     Pre-AF: (p01, p02)  → one subject group (paired odd/even)
 
-    returns:
-        list of (group_id, record_ids, label)
+    Args:
+        nsr_records (List[str]): list of NSR record IDs
+        preaf_records (List[str]): list of Pre-AF record IDs
+
+    Returns:
+        List[Tuple]: list of (group_id, record_ids, label)
     """
     nsr_set = set(nsr_records)
     preaf_set = set(preaf_records)
@@ -182,8 +217,12 @@ def split_subjects_721(subjects: List[Tuple],seed: int = 42):
     """
     split subjects into train/val/test (70/20/10) while keeping pairs together.
 
-    returns:
-        dict with keys 'train', 'val', 'test' containing record IDs
+    Args:
+        subjects (List[Tuple]): list of (group_id, record_ids, label) tuples
+        seed (int): random seed for reproducibility
+
+    Returns:
+        Dict: dict with keys 'train', 'val', 'test' containing record IDs
     """
     rng = random.Random(seed)
     preaf_s = [s for s in subjects if s[2] == 1]
@@ -233,7 +272,15 @@ class DatasetGenerator:
             raise ValueError(f"invalid mode: {mode}")
 
     def _load_signal(self, record_id: str):
-        """load and resample ECG signal from WFDB record."""
+        """
+        load and resample ECG signal from WFDB record.
+
+        Args:
+            record_id (str): WFDB record identifier
+
+        Returns:
+            np.ndarray or None: resampled signal or None if loading fails
+        """
         try:
             rec = wfdb.rdrecord(str(DATA_DIR / record_id))
             raw = rec.p_signal[:, 0].astype(np.float64)
@@ -243,7 +290,15 @@ class DatasetGenerator:
             return None
 
     def _extract_segments(self, signal: np.ndarray):
-        """extract N evenly-spaced segments from signal."""
+        """
+        extract N evenly-spaced segments from signal.
+
+        Args:
+            signal (np.ndarray): input signal
+
+        Returns:
+            List[np.ndarray]: list of signal segments
+        """
         max_start = len(signal) - SEGMENT_SAMPLES
         if max_start <= 0:
             return []
@@ -259,8 +314,16 @@ class DatasetGenerator:
         """
         process one record into URP images.
 
-        returns:
-            list of sample dicts with images and metadata
+        Args:
+            record_id (str): WFDB record identifier
+            label (int): class label (0=NSR, 1=Pre-AF)
+            tau_single (int): time delay for full-band URP
+            m_single (int): embedding dimension for full-band URP
+            subband_tau (Dict): dict of time delays per subband
+            subband_m (Dict): dict of embedding dimensions per subband
+
+        Returns:
+            List[Dict]: list of sample dicts with images and metadata
         """
         signal = self._load_signal(record_id)
         if signal is None:
@@ -322,7 +385,16 @@ class DatasetGenerator:
         return results
 
     def _save_hdf5(self, samples: List[Dict], path: Path):
-        """save processed samples to HDF5 file."""
+        """
+        save processed samples to HDF5 file.
+
+        Args:
+            samples (List[Dict]): list of sample dicts with images and metadata
+            path (Path): output HDF5 file path
+
+        Returns:
+            None
+        """
         if not samples:
             return
 
@@ -374,6 +446,13 @@ class DatasetGenerator:
         creates train/val/test splits with:
           - full-band URPs from denoised full-band signal
           - multi-scale URPs from denoised wavelet subbands (D2-D8)
+
+        Args:
+            params_file (Path): path to JSON file with tau and m parameters
+            seed (int): random seed for train/val/test split
+
+        Returns:
+            None
         """
         with open(params_file) as f:
             params = json.load(f)

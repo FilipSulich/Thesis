@@ -10,7 +10,7 @@
 
 ## Project Overview
 
-This repository contains the implementation of a machine learning-based approach for predicting atrial fibrilation (AF) using a late-fusion convolutional neural network (CNN)
+This repository contains the implementation of a machine learning-based approach for predicting atrial fibrilation (AF) from ECG signals using a late-fusion convolutional neural network (CNN)
 and multi-scale unthresholded recurrence plots (URPs).
 
 ## Project Structure
@@ -152,8 +152,8 @@ Generative AI (Claude by Anthropic, model Opus 4.6) was used to assist with the 
 - Help with formatting this README file
 
 **Code Refactoring:**
-- Help with removing code redundancy and optimization
-- Suggestions for code organization and structure improvements
+- Help with removing code redundancy
+- Suggestions for code organization
 
 
 ## License

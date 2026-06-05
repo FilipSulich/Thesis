@@ -218,7 +218,6 @@ class WaveletEvaluator:
             name = f'D{level}'
             X, y, rec_ids = self._build_features(wavelet, level)
 
-            # Need enough samples for CV
             if len(X) < 20 or y.sum() < 5 or (len(y) - y.sum()) < 5:
                 subband_results[name] = None
                 continue

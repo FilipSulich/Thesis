@@ -8,11 +8,11 @@ from src.wavelets.wavelet_transform import WaveletTransform
 
 
 class DWT(WaveletTransform):
-    """discrete wavelet transform (DWT) implementation using PyWavelets"""
+    """Discrete Wavelet Transform (DWT) implementation using PyWavelets"""
 
     def decompose(self, signal: np.ndarray, level) -> list:
         """
-        performs multi-level DWT decomposition producing decimated coefficients
+        performs multi-level DWT decomposition producing downsampled coefficients
 
         Args:
             signal (np.ndarray): input signal to decompose

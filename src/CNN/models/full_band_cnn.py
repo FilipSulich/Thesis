@@ -9,7 +9,7 @@ class FullBandCNN(nn.Module):
 
     def __init__(self, dropout: float = 0.5):
         """
-        initializes the full-band CNN with encoder and classifier
+        initializes the full-band CNN classifier
 
         Args:
             dropout (float): dropout probability for regularization in classifier, defaults to 0.5

@@ -42,7 +42,7 @@ def main():
     #below the experiment configuration is created with the specified parameters
     config = ExperimentConfig(
         fs=128,
-        n=1024,
+        n=1280,
         level=4,
         wavelet='db4',
         subband_freqs=subband_freq,

@@ -8,12 +8,12 @@ SUBBAND_KEYS = ['D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8']
 
 class FullDataset(Dataset):
     """
-    combines data from different sets (training, validation and test) into one pool for patient-level 10-fold CV
+    combines data from different sets (training, validation and test) into one pool for subject-level 10-fold CV
     """
 
     def __init__(self, h5_dir: Path, mode: str = 'multi_denoise', subband_keys=None):
         """
-        initializes the combined dataset by loading all splits and creating a unified sample mapping
+        initializes the combined dataset by loading all splits
 
         Args:
             h5_dir (Path): directory containing train.h5, val.h5, and test.h5 files

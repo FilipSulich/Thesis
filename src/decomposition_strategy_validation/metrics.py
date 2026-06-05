@@ -68,7 +68,6 @@ def compute_structural_metrics(ref_rp, test_rp):
         dict: dictionary containing 'hamming_distance' and 'pattern_correlation' keys with their computed values, or NaN values if computation fails
     """
     try:
-        # pad test RP to match reference size
         ref_size = ref_rp.shape[0]
         test_rp_padded = pad_matrix(test_rp, ref_size)
 
