@@ -321,10 +321,8 @@ class WaveletEvaluator:
                     scores1 = np.array(wavelet_scores[w1])
                     scores2 = np.array(wavelet_scores[w2])
 
-                    # wilcoxon signed-rank test
                     result = wilcoxon(scores1, scores2, alternative='two-sided')
 
-                    # rosenthal's r effect size
                     n = len(scores1)
                     r = result.zstatistic / np.sqrt(n) if hasattr(result, 'zstatistic') else 0.0
 
@@ -334,7 +332,6 @@ class WaveletEvaluator:
                         'effect_size': float(r)
                     })
 
-            # holm-bonferroni correction
             comparisons.sort(key=lambda x: x['p_value'])
             n_comparisons = len(comparisons)
 
@@ -386,9 +383,7 @@ class WaveletEvaluator:
     @staticmethod
     def perform_statistical_tests_from_json(json_path, alpha=0.05, output_path=None):
         """
-        perform friedman test comparing wavelets based on median AUC across all subbands.
-
-        for each wavelet, computes fold-wise median AUC across all subbands (D2-D8), then compares these medians using friedman test and pairwise wilcoxon tests.
+        perform friedman test comparing wavelets based on AUC across all subbands.
 
         args:
             json_path: path to wavelet_selection_results.json

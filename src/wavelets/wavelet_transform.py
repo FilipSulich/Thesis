@@ -10,7 +10,7 @@ class WaveletTransform(ABC):
 
         Args:
             wavelet (str): wavelet function name (e.g., 'db4', 'sym5')
-            level (int): decomposition level for multi-resolution analysis
+            level (int): decomposition level for multi-level analysis
 
         Returns:
             None

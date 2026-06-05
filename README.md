@@ -144,7 +144,7 @@ python ablation_study.py
 
 ## Disclosure: Use of Generative AI
 
-Generative AI (Claude Code by Anthropic, model Opus 4.6) was used to assist with the following aspects of this project:
+Generative AI (Claude by Anthropic, model Opus 4.6) was used to assist with the following aspects of this project:
 
 **Code Documentation:**
 - Generation of documentation for functions and classes
